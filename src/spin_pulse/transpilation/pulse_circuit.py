@@ -484,6 +484,11 @@ class PulseCircuit:
         """
         num_samples = self.circuit_samples(exp_env)
         self.t_lab = 0
+        if num_samples == 0:
+            raise ValueError(
+                "Number of sample is 0. This is caused because the"
+                " duration of the circuit is greater than environment duration."
+            )
         for i in tqdm(range(num_samples)):
             self.attach_time_traces(exp_env)
             if i == 0:
