@@ -71,6 +71,7 @@ class HardwareSpecs:
         - second_pass (PassManager): Additional optimization pass manager.
         - dynamical_decoupling (DynamicalDecoupling | None): Optional
           dynamical decoupling sequence applied to idle qubits.
+        - optim (int): Qiskit optimization level
 
     """
 
