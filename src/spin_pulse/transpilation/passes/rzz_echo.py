@@ -20,6 +20,12 @@ from qiskit.dagcircuit import DAGCircuit
 from qiskit.transpiler.basepasses import TransformationPass
 
 
+# Key written into ``DAGCircuit.metadata`` once the echo has been applied, so the
+# pass can be a no-op if it runs again (e.g. once during ``HardwareSpecs.gate_transpile``
+# and once again inside ``PulseCircuit.from_dag_circuit``).
+_ECHOED_METADATA_KEY = "spin_pulse_rzz_echoed"
+
+
 class RZZEchoPass(TransformationPass):
     r"""Echo :math:`R_{ZZ}` gates with :math:`X` pulses to mitigate Stark shifts.
 
@@ -27,6 +33,9 @@ class RZZEchoPass(TransformationPass):
     sequence consisting of interleaved :math:`\pi` rotations around the :math:`x` axis and
     :math:`R_{ZZ}` gates with half the original angle. The echo sequence is applied
     locally on each occurrence of an RZZ gate in the input DAG circuit.
+
+    The pass is idempotent: it records a marker in ``dag.metadata`` and returns the
+    DAG untouched if it is run a second time.
     """
 
     def run(
@@ -53,6 +62,20 @@ class RZZEchoPass(TransformationPass):
             DAGCircuit: New DAG circuit where each :math:`R_{ZZ}` gate has been replaced by the echoed :math:`R_{ZZ}` sequence.
 
         """
+        metadata = dag.metadata
+        if metadata is None:
+            metadata = {}
+        elif not isinstance(metadata, dict):
+            # Not a real metadata mapping (e.g. a test double); leave the DAG untouched.
+            return dag
+        elif metadata.get(_ECHOED_METADATA_KEY):
+            # Already echoed (e.g. by HardwareSpecs.gate_transpile) -- do not echo twice.
+            return dag
+        # Work on a fresh dict: ``DAGCircuit.metadata`` aliases the source circuit's
+        # ``metadata`` (``circuit_to_dag`` shares the reference), so mutating it in
+        # place would leak the marker back onto the caller's circuit.
+        metadata = dict(metadata)
+
         for node in dag.op_nodes():
             if not node.op.name == "rzz":
                 continue
@@ -71,4 +94,6 @@ class RZZEchoPass(TransformationPass):
 
             dag.substitute_node_with_dag(node, mini_dag)
 
+        metadata[_ECHOED_METADATA_KEY] = True
+        dag.metadata = metadata
         return dag
