@@ -495,3 +495,42 @@ def test_attach_time_traces_normal(hw_no_dd):
 
     # t_lab should have advanced by pc.duration
     assert pc.t_lab == pc.duration
+
+
+@pytest.mark.parametrize("operands", [(0, 1), (1, 0), (1, 2), (2, 1)])
+def test_attach_time_traces_two_qubit_operand_order(operands):
+    """Coupling time traces must be indexed by the coupling edge, not by the gate's
+    first operand. A two-qubit gate whose operands are in reverse order (e.g.
+    ``rzz q[i+1], q[i]``) used to pick the wrong coupling trace -- and raise
+    ``IndexError`` when that operand was the last qubit."""
+    from qiskit import QuantumCircuit as QC
+
+    from spin_pulse import ExperimentalEnvironment, HardwareSpecs, Shape
+    from spin_pulse.environment.noise import NoiseType
+
+    specs = HardwareSpecs(
+        num_qubits=3,
+        B_field=0.06,
+        delta=0.06,
+        J_coupling=0.003,
+        rotation_shape=Shape.GAUSSIAN,
+        ramp_duration=5,
+        coeff_duration=5,
+    )
+    env = ExperimentalEnvironment(
+        specs,
+        noise_type=NoiseType.PINK,
+        T2S=10_000,
+        TJS=5_000,
+        duration=2**16,
+        segment_duration=2**16,
+        seed=1,
+    )
+
+    circ = QC(3)
+    circ.rzz(0.5, *operands)
+
+    # Must not raise; and re-attaching across "shots" must keep working.
+    pc = PulseCircuit.from_circuit(circ, specs, exp_env=env)
+    pc.attach_time_traces(env)
+    pc.attach_time_traces(env)

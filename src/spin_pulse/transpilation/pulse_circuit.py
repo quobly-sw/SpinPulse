@@ -674,7 +674,14 @@ class PulseCircuit:
                             for tt in self.time_traces_coupling
                         ]
                         for sequence in layer.twoq_pulse_sequences:
-                            j = sequence.qubits[0]._index
+                            # Coupling time traces are indexed by the lower of the two
+                            # (adjacent) qubit indices, i.e. by the coupling edge
+                            # (i, i + 1). Two-qubit gates may be given with their
+                            # operands in either order (e.g. ``rzz q[i+1], q[i]``), so
+                            # use ``min`` here -- using ``qubits[0]`` directly picks the
+                            # wrong trace, and is out of range when that operand is the
+                            # last qubit.
+                            j = min(q._index for q in sequence.qubits)
                             for k in range(sequence.n_pulses):
                                 instruction = sequence.pulse_instructions[k]
                                 ta, tb = (
