@@ -28,6 +28,7 @@ from tqdm import tqdm
 from ..environment.experimental_environment import ExperimentalEnvironment
 from .hardware_specs import HardwareSpecs
 from .instructions import IdleInstruction
+from .passes.rzz_echo import RZZEchoPass
 from .pulse_layer import PulseLayer
 
 
@@ -170,6 +171,17 @@ class PulseCircuit:
 
         dag.remove_all_ops_named("measure")
         dag.remove_all_ops_named("barrier")
+
+        # Echo every RZZ gate. spin-pulse realises an ``rzz`` gate by detuning the two
+        # qubits (a strong, opposite-sign Z field on each) for the whole exchange pulse;
+        # that detuning suppresses the unwanted XX + YY part of the Heisenberg coupling
+        # but also imprints a large spurious single-qubit Z (Stark) phase that only
+        # cancels when each ``rzz`` is wrapped in an X echo. Applying it here makes
+        # ``from_circuit``/``from_dag_circuit`` produce a faithful pulse circuit even
+        # when the caller has not run ``HardwareSpecs.gate_transpile`` first. The pass
+        # is idempotent (it marks ``dag.metadata``), so it is a no-op when the circuit
+        # already went through ``gate_transpile``.
+        dag = RZZEchoPass().run(dag)
 
         """dag.data = [
             inst for inst in circ.data if not isinstance(inst.operation, Measure)

@@ -165,3 +165,69 @@ def test_random_circuit(n_qb, depth):
         process_fidelity(Operator.from_circuit(circ), Operator.from_circuit(isa_circ)),
         1,
     )
+
+
+@pytest.mark.parametrize(
+    "B0, delta, J_coupling, rotation_shape, ramp_duration, coeff_duration",
+    params,
+)
+@pytest.mark.parametrize("angle", [m.pi, m.pi / 2, m.pi / 8])
+def test_rzz_from_circuit_matches_gate_transpiled_flow(
+    B0, delta, J_coupling, rotation_shape, ramp_duration, coeff_duration, angle
+):
+    """``PulseCircuit.from_circuit`` on a native-basis circuit must give the same
+    implemented unitary as the documented ``gate_transpile`` -> ``from_circuit`` flow.
+
+    Regression test: ``from_circuit`` now applies ``RZZEchoPass`` itself, so an
+    ``rzz`` gate fed in directly (without ``gate_transpile``) is echoed -- and the X
+    echo cancels the large spurious single-qubit Z (Stark) phase the detuning pulses
+    introduce. Without the echo the direct path and the documented path disagree
+    badly (the direct one has fidelity well below 1 against the ideal gate).
+    """
+    direct_circ = qi.QuantumCircuit(2)
+    direct_circ.rzz(angle, 0, 1)
+
+    hardware_specs = HardwareSpecs(
+        num_qubits=2,
+        B_field=B0,
+        delta=delta,
+        J_coupling=J_coupling,
+        rotation_shape=rotation_shape,
+        ramp_duration=ramp_duration,
+        coeff_duration=coeff_duration,
+    )
+
+    # direct: no gate_transpile() -- the circuit is already in the native basis
+    direct_impl = PulseCircuit.from_circuit(direct_circ, hardware_specs).to_circuit()
+    # documented flow: gate_transpile() (which echoes), then from_circuit()
+    isa_circ = hardware_specs.gate_transpile(direct_circ)
+    flow_impl = PulseCircuit.from_circuit(isa_circ, hardware_specs).to_circuit()
+
+    assert m.isclose(
+        process_fidelity(
+            Operator.from_circuit(direct_impl), Operator.from_circuit(flow_impl)
+        ),
+        1,
+        abs_tol=1e-6,
+    )
+
+
+def test_rzz_echo_pass_is_idempotent():
+    """Running ``RZZEchoPass`` twice must not double the echo (``from_circuit`` may run
+    it after ``gate_transpile`` already did)."""
+    from qiskit.converters import circuit_to_dag, dag_to_circuit
+
+    from spin_pulse.transpilation.passes.rzz_echo import RZZEchoPass
+
+    circ = qi.QuantumCircuit(2)
+    circ.rzz(m.pi / 3, 0, 1)
+
+    once = dag_to_circuit(RZZEchoPass().run(circuit_to_dag(circ)))
+    twice = dag_to_circuit(RZZEchoPass().run(circuit_to_dag(once)))
+
+    assert once.count_ops() == twice.count_ops()
+    assert m.isclose(
+        process_fidelity(Operator.from_circuit(once), Operator.from_circuit(twice)), 1
+    )
+    # and the marker did not leak back onto the original circuit
+    assert "spin_pulse_rzz_echoed" not in (circ.metadata or {})
