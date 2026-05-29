@@ -503,7 +503,6 @@ def test_attach_time_traces_two_qubit_operand_order(operands):
     first operand. A two-qubit gate whose operands are in reverse order (e.g.
     ``rzz q[i+1], q[i]``) used to pick the wrong coupling trace -- and raise
     ``IndexError`` when that operand was the last qubit."""
-    from qiskit import QuantumCircuit as QC
 
     from spin_pulse import ExperimentalEnvironment, HardwareSpecs, Shape
     from spin_pulse.environment.noise import NoiseType
@@ -527,7 +526,7 @@ def test_attach_time_traces_two_qubit_operand_order(operands):
         seed=1,
     )
 
-    circ = QC(3)
+    circ = QuantumCircuit(3)
     circ.rzz(0.5, *operands)
 
     # Must not raise; and re-attaching across "shots" must keep working.
