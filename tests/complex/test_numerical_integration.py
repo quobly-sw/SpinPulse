@@ -214,7 +214,8 @@ def test_rzz_from_circuit_matches_gate_transpiled_flow(
 
 def test_rzz_echo_pass_is_idempotent():
     """Running ``RZZEchoPass`` twice must not double the echo (``from_circuit`` may run
-    it after ``gate_transpile`` already did)."""
+    it after ``gate_transpile`` already did).
+    """
     from qiskit.converters import circuit_to_dag, dag_to_circuit
 
     from spin_pulse.transpilation.passes.rzz_echo import RZZEchoPass

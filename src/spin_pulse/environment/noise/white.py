@@ -87,5 +87,10 @@ class WhiteNoiseTimeTrace(NoiseTimeTrace):
 
         """
         t = np.arange(ramsey_duration)
-        plt.plot(np.exp(-t / self.T2S), label="$e^{-t/T_2^*}$", color="orange")
+        plt.plot(
+            self.get_analytical_contrast(t), label="$e^{-t/T_2^*}$", color="orange"
+        )
         super().plot_ramsey_contrast(ramsey_duration)
+
+    def get_analytical_contrast(self, idle_duration):
+        return np.exp(-idle_duration / self.T2S)

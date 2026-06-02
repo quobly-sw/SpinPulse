@@ -372,7 +372,10 @@ def test_averaging_over_samples(two_qubits, pulse_layers, hw_no_dd):
     pc = PulseCircuit(qc, two_qubits, pulse_layers, hw_no_dd, exp_env=None)
 
     with (
-        patch("spin_pulse.transpilation.pulse_circuit.tqdm", side_effect=lambda x: x),
+        patch(
+            "spin_pulse.transpilation.pulse_circuit.tqdm",
+            side_effect=lambda x, disable: x,
+        ),
         patch.object(pc, "attach_time_traces") as mock_attach,
     ):
 
@@ -380,7 +383,7 @@ def test_averaging_over_samples(two_qubits, pulse_layers, hw_no_dd):
             # always return scalar 10.0
             return 10.0
 
-        avg = pc.averaging_over_samples(fake_eval, exp_env)
+        avg = pc.averaging_over_samples(fake_eval, exp_env)  # , progress_bar=True)
 
         # avg should be dict with exactly 1 key, value ~10
         assert isinstance(avg, float)
@@ -426,12 +429,12 @@ def test_mean_fidelity_and_mean_channel_wrappers(two_qubits, pulse_layers, hw_no
         # mean_fidelity()
         out_mean_fid = pc.mean_fidelity(exp_env="ENV", circ_ref=dummy_ref_circ)
         assert pytest.approx(out_mean_fid, rel=1e-12) == 0.5
-        mock_avg.assert_any_call(ANY, "ENV")
+        mock_avg.assert_any_call(ANY, "ENV", num_samples=None, progress_bar=True)
 
         # mean_channel() -> lambda x: SuperOp(Operator.from_circuit(x.to_circuit()))
         out_channel = pc.mean_channel(exp_env="ENV2")
         assert pytest.approx(out_channel, rel=1e-12) == 0.5
-        mock_avg.assert_any_call(ANY, "ENV2")
+        mock_avg.assert_any_call(ANY, "ENV2", num_samples=None, progress_bar=True)
 
         assert mock_avg.call_count == 2
 
@@ -451,8 +454,9 @@ def test_attach_time_traces_too_short(two_qubits, pulse_layers, hw_no_dd):
     # Force a too-short env: exp_env.duration < pc.duration
     exp_env = dm.DummyExpEnv(duration=5, hardware_specs=hw, with_coupling=True)
     pc.t_lab = 0
-    with pytest.warns(UserWarning):
+    with pytest.raises(ValueError) as e:
         pc.attach_time_traces(exp_env)
+    assert "Environment duration" in str(e)
 
 
 def test_attach_time_traces_normal(hw_no_dd):
@@ -502,7 +506,8 @@ def test_attach_time_traces_two_qubit_operand_order(operands):
     """Coupling time traces must be indexed by the coupling edge, not by the gate's
     first operand. A two-qubit gate whose operands are in reverse order (e.g.
     ``rzz q[i+1], q[i]``) used to pick the wrong coupling trace -- and raise
-    ``IndexError`` when that operand was the last qubit."""
+    ``IndexError`` when that operand was the last qubit.
+    """
 
     from spin_pulse import ExperimentalEnvironment, HardwareSpecs, Shape
     from spin_pulse.environment.noise import NoiseType

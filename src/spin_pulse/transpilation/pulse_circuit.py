@@ -471,7 +471,14 @@ class PulseCircuit:
             )
         return "".join(logical_bits[::-1])
 
-    def averaging_over_samples(self, f, exp_env: ExperimentalEnvironment | None, *args):
+    def averaging_over_samples(
+        self,
+        f,
+        exp_env: ExperimentalEnvironment | None,
+        *args,
+        num_samples: int | None = None,
+        progress_bar: bool = True,
+    ):
         r"""Estimate the average value over as many noisy samples as the experimental environment
         allows it, of a user-provided function using the pulse circuit.
 
@@ -489,28 +496,44 @@ class PulseCircuit:
                 which time traces are drawn. If None, a single deterministic
                 evaluation is performed.
             \*Parameters: Additional positional arguments forwarded to ``f``.
+            num_samples (int | None): Number of samples to be used. Default if None,
+                in this case result of the circuit_samples function if taken.
+            progress_bar (bool): if True, shows the progress. Default is True.
 
         Returns:
             Any: The sample-averaged value of ``f(self, *args)``.
 
         """
-        num_samples = self.circuit_samples(exp_env)
-        self.t_lab = 0
+        num_samples_exp_env = self.circuit_samples(exp_env)
+        if num_samples is None:
+            num_samples = num_samples_exp_env
+        elif num_samples > num_samples_exp_env:
+            warnings.warn(
+                f"You requested a number of samples ({num_samples}) to high for the experimental \
+                enviromnent specified. I will use {num_samples_exp_env} instead (maximum number possible)."
+            )
+            num_samples = num_samples_exp_env
+
         if num_samples == 0:
             raise ValueError(
                 "Number of sample is 0. This is caused because the"
                 " duration of the circuit is greater than environment duration."
             )
-        for i in tqdm(range(num_samples)):
+        self.t_lab = 0
+        for i in tqdm(range(num_samples), disable=(not progress_bar)):
             self.attach_time_traces(exp_env)
             if i == 0:
-                f_avg = f(self, *args) / num_samples
+                f_sum = f(self, *args)
             else:
-                f_avg += f(self, *args) / num_samples
-        return f_avg
+                f_sum += f(self, *args)
+        return f_sum / num_samples
 
     def run_experiment(
-        self, exp_env: ExperimentalEnvironment, simulator=AerSimulator()
+        self,
+        exp_env: ExperimentalEnvironment,
+        simulator=AerSimulator(),
+        num_samples: int | None = None,
+        progress_bar: bool = True,
     ):
         """
         Simulate single-shot measurement on noisy instances of the circuit.
@@ -524,19 +547,34 @@ class PulseCircuit:
             exp_env (ExperimentalEnvironment | None): Noise environment from
                 which time traces are drawn. If None, a single deterministic
                 evaluation is performed.
-            - simulator: an instance of qiksit's AerSimulator.
+            simulator: an instance of qiksit's AerSimulator.
+            num_samples (int | None): Number of samples to be used. Default if None,
+                in this case result of the circuit_samples function if taken.
+            progress_bar (bool): if True, shows the progress. Default is True.
 
         Returns:
             dict: A dictionary which keys are the obtained bitstrings and their respective number of occurences.
 
         """
-
-        num_samples = self.circuit_samples(exp_env)
+        num_samples_exp_env = self.circuit_samples(exp_env)
+        if num_samples is None:
+            num_samples = num_samples_exp_env
+        elif num_samples > num_samples_exp_env:
+            warnings.warn(
+                f"You requested a number of samples ({num_samples}) to high for the experimental \
+                enviromnent specified. I will use {num_samples_exp_env} instead (maximum number possible)."
+            )
+            num_samples = num_samples_exp_env
+        if num_samples == 0:
+            raise ValueError(
+                "Number of sample is 0. This is caused because the"
+                " duration of the circuit is greater than environment duration."
+            )
         self.t_lab = 0
         result: defaultdict[str, int] = defaultdict(int)
 
         simulator = AerSimulator()
-        for _ in tqdm(range(num_samples)):
+        for _ in tqdm(range(num_samples), disable=(not progress_bar)):
             self.attach_time_traces(exp_env)
             circuit = self.to_circuit()
             circuit.measure_all()
@@ -555,7 +593,7 @@ class PulseCircuit:
 
         Parameters:
             circ_ref (qiskit.QuantumCircuit): Reference circuit used to define the
-                target unitary. Default is self.original_circ
+                target unitary. Default is self.original_circ.
 
         Returns:
             float: Average gate fidelity between the PulseCircuit unitary and
@@ -573,6 +611,8 @@ class PulseCircuit:
         self,
         exp_env: ExperimentalEnvironment | None,
         circ_ref: QuantumCircuit | None = None,
+        num_samples: int | None = None,
+        progress_bar: bool = True,
     ) -> float:
         """Estimate the mean fidelity under a stochastic noise environment.
 
@@ -586,6 +626,10 @@ class PulseCircuit:
                 target unitary.
             exp_env (ExperimentalEnvironment | None): Noise environment from
                 which time traces are drawn.
+            num_samples (int | None): Number of samples to be used. Default if None,
+                in this case result of the circuit_samples function if taken.
+            progress_bar (bool): if True, shows the progress. Default is True.
+
 
         Returns:
             float: Sample-averaged gate fidelity under the specified noise
@@ -593,10 +637,18 @@ class PulseCircuit:
 
         """
         return self.averaging_over_samples(
-            lambda pulse_circ: pulse_circ.fidelity(circ_ref), exp_env
+            lambda pulse_circ: pulse_circ.fidelity(circ_ref),
+            exp_env,
+            num_samples=num_samples,
+            progress_bar=progress_bar,
         )
 
-    def mean_channel(self, exp_env: ExperimentalEnvironment | None = None):
+    def mean_channel(
+        self,
+        exp_env: ExperimentalEnvironment | None = None,
+        num_samples: int | None = None,
+        progress_bar: bool = True,
+    ):
         """Estimate the mean quantum channel generated by the pulse circuit.
 
         For each noise realization, the PulseCircuit is converted to a
@@ -607,6 +659,9 @@ class PulseCircuit:
         Parameters:
             exp_env (ExperimentalEnvironment | None): Noise environment from
                 which time traces are drawn.
+            num_samples (int | None): Number of samples to be used. Default if None,
+                in this case result of the circuit_samples function if taken.
+            progress_bar (bool): if True, shows the progress. Default is True.
 
         Returns:
             qiskit.quantum_info.SuperOp: Sample-averaged quantum channel acting on the qubit
@@ -614,7 +669,10 @@ class PulseCircuit:
 
         """
         return self.averaging_over_samples(
-            lambda x: SuperOp(Operator.from_circuit(x.to_circuit())), exp_env
+            lambda x: SuperOp(Operator.from_circuit(x.to_circuit())),
+            exp_env,
+            num_samples=num_samples,
+            progress_bar=progress_bar,
         )
 
     def attach_time_traces(self, exp_env: ExperimentalEnvironment | None = None):
@@ -634,6 +692,9 @@ class PulseCircuit:
         circuit duration after attaching the time traces, so that subsequent
         calls use the next segment of the noise time trace.
 
+        In case of the "t_lab" plus circuit duration is greater than the exp_env duration,
+        a ValueError is raised.
+
         Parameters:
             exp_env (ExperimentalEnvironment | None): Experimental
                 environment providing qubit's frequency deviation time trace
@@ -644,7 +705,10 @@ class PulseCircuit:
         if exp_env is not None:
             t_lab = self.t_lab
             if t_lab + self.duration > exp_env.duration:
-                warnings.warn("Warning: Time trace too short. Wrong averaging expected")
+                raise ValueError(
+                    f"Environment duration {exp_env.duration} trace too short"
+                    f"for circuit duration {self.duration} at t_lab time {t_lab}"
+                )
             else:
                 self.time_traces = [
                     tt.values[t_lab : t_lab + self.duration]

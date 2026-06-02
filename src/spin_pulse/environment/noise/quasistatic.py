@@ -89,6 +89,9 @@ class QuasistaticNoiseTimeTrace(NoiseTimeTrace):
         """
         t = np.arange(ramsey_duration)
         plt.plot(
-            np.exp(-(t**2) / self.T2S**2), label="$e^{-(t/T_2^*)^2}$", color="orange"
+            self.get_analytical_contrast(t), label="$e^{-(t/T_2^*)^2}$", color="orange"
         )
         super().plot_ramsey_contrast(ramsey_duration)
+
+    def get_analytical_contrast(self, idle_duration):
+        return np.exp(-((idle_duration / self.T2S) ** 2))

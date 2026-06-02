@@ -19,7 +19,6 @@ from qiskit.circuit.library import RXGate, RZZGate
 from qiskit.dagcircuit import DAGCircuit
 from qiskit.transpiler.basepasses import TransformationPass
 
-
 # Key written into ``DAGCircuit.metadata`` once the echo has been applied, so the
 # pass can be a no-op if it runs again (e.g. once during ``HardwareSpecs.gate_transpile``
 # and once again inside ``PulseCircuit.from_dag_circuit``).

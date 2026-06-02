@@ -13,7 +13,9 @@
 # --------------------------------------------------------------------------------------
 """Description of the hardware to simulate circuit execution."""
 
+import warnings
 from enum import Enum
+from typing import Union
 
 from qiskit import QuantumCircuit
 from qiskit.providers.fake_provider import GenericBackendV2
@@ -26,7 +28,6 @@ from qiskit.transpiler.passes import Optimize1qGatesDecomposition
 from .dynamical_decoupling import DynamicalDecoupling
 from .instructions import (
     GaussianRotationInstruction,
-    RotationInstruction,
     SquareRotationInstruction,
 )
 from .passes.rzz_echo import RZZEchoPass
@@ -75,7 +76,9 @@ class HardwareSpecs:
 
     """
 
-    rotation_generator: type[RotationInstruction]
+    rotation_generator: Union[
+        type[SquareRotationInstruction], type[GaussianRotationInstruction]
+    ]  # should add any new rotation type. should be reviewed to be more versatile
 
     def __init__(
         self,
@@ -119,14 +122,16 @@ class HardwareSpecs:
             num_qubits=num_qubits, coupling_map=coupling_map, basis_gates=basis_gates
         )
 
-        if B_field <= 1e-3:
+        if B_field < 1e-3:
             raise ValueError(f"B_field must be greater than 1e-3, got {B_field}")
 
-        if delta <= 1e-3:
+        if delta < 1e-3:
             raise ValueError(f"delta must be greater than 1e-3, got {delta}")
 
-        if J_coupling <= 1e-3:
-            raise ValueError(f"J_coupling must be greater than 1e-3, got {J_coupling}")
+        if J_coupling < 1e-3:
+            warnings.warn(
+                f"J_coupling value smaller than 1e-3 ({J_coupling}), simulation might be long."
+            )
 
         if dynamical_decoupling is not None and not isinstance(
             dynamical_decoupling, DynamicalDecoupling
