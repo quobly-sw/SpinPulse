@@ -146,12 +146,29 @@ def test_str_representation_for_square():
     [
         (0.0001, 0.2, 0.2),
         (0.1, 0.0002, 0.2),
-        (0.1, 0.2, 0.0002),
     ],
 )
 def test_invalid_hardware_specs_raises(B_field, delta, J_coupling):
     """Test that invalid hardware specs raise appropriate errors."""
     with pytest.raises(ValueError):
+        HardwareSpecs(
+            num_qubits=1,
+            B_field=B_field,
+            delta=delta,
+            J_coupling=J_coupling,
+            rotation_shape=Shape.GAUSSIAN,
+        )
+
+
+@pytest.mark.parametrize(
+    "B_field, delta, J_coupling",
+    [
+        (0.1, 0.1, 0.0002),
+    ],
+)
+def test_invalid_hardware_specs_warns(B_field, delta, J_coupling):
+    """Test that invalid hardware specs raise appropriate errors."""
+    with pytest.warns():
         HardwareSpecs(
             num_qubits=1,
             B_field=B_field,

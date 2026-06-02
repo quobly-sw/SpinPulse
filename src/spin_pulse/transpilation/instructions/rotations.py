@@ -13,13 +13,15 @@
 # --------------------------------------------------------------------------------------
 """Description of rotations at the pulse level."""
 
+import warnings
+
 import matplotlib.pyplot as plt
 import numpy as np
 from qiskit.quantum_info import Pauli
 
 from .pulse_instruction import PulseInstruction
 
-MAX_DURATION = 5e4
+MAX_DURATION = 1e5
 MAX_ITER = 1e5
 
 
@@ -59,10 +61,10 @@ class RotationInstruction(PulseInstruction):
         self.name = name
 
     @classmethod
-    def from_angle(cls, name, qubits, angle, hardware_specs):
+    def from_angle(cls, name, qubits, angle, hardware_specs, low_duration, shape_param):
         """Construct a rotation instruction from a target angle.
 
-        This class method must be implemented by subclasses to map a target
+        This class method must be called by subclasses to map a target
         rotation angle to a concrete pulse shape and duration, using the
         hardware specifications.
 
@@ -77,12 +79,64 @@ class RotationInstruction(PulseInstruction):
         Returns:
             RotationInstruction: Instance of the subclass implementing the requested rotation.
 
-        Raises:
-            NotImplementedError: If the method is not implemented in
-              the subclass.
-
         """
-        raise NotImplementedError
+        sign = np.sign(angle)
+
+        prev_duration = -1
+        prev_low = -1
+        prev_high = -1
+        high_duration = MAX_DURATION
+        cpt = 0
+
+        while cpt < MAX_ITER and low_duration <= high_duration:
+            duration = low_duration + (high_duration - low_duration) // 2
+
+            if (
+                duration == prev_duration
+                and low_duration == prev_low
+                and high_duration == prev_high
+            ):
+                break
+
+            prev_duration = duration
+            prev_low = low_duration
+            prev_high = high_duration
+
+            amplitude_1 = 1
+            instruction = cls(name, qubits, amplitude_1, sign, shape_param, duration)
+            angle_1 = instruction.to_angle()
+            if np.abs(angle_1) > 1e-15:
+                amplitude = np.abs(angle) / np.abs(angle_1)
+            else:
+                amplitude = np.inf
+            if amplitude < hardware_specs.fields[name]:
+                high_duration = duration - 1
+            elif np.isclose(amplitude, hardware_specs.fields[name], atol=1e-16):
+                pass
+            else:
+                low_duration = duration + 1
+            cpt += 1
+
+        if cpt >= MAX_ITER:
+            warnings.warn(
+                f"Maximum of iterations reached for angle={angle}, duration={duration}"
+            )
+
+        # if amplitude >= hardware_specs.fields[name] + 1e-10:
+        #     duration += 1
+        #     amplitude_1 = 1
+        #     instruction = cls(name, qubits, amplitude_1, sign, shape_param, duration)
+        #     angle_1 = instruction.to_angle()
+        #     if np.abs(angle_1) > 1e-15:
+        #         amplitude = np.abs(angle) / np.abs(angle_1)
+        #     if amplitude >= hardware_specs.fields[name] + 1e-10:
+        #         warnings.warn(
+        #             f"Amplitude is higher ({amplitude}) than what the hardware allows ({hardware_specs.fields[name]})"
+        #         )
+
+        instruction = cls(name, qubits, amplitude, sign, shape_param, duration)
+
+        return instruction
 
     def eval(self, t):
         """Evaluate the pulse envelope at the given time indices.
@@ -327,60 +381,14 @@ class SquareRotationInstruction(RotationInstruction):
             SquareRotationInstruction: A square pulse instruction that performs the requested rotation with the target angle within the hardware limits.
 
         """
-        sign = np.sign(angle)
-
-        prev_duration = -1
-        prev_low = -1
-        prev_high = -1
-        # Evaluating the smallest pulse_duration available
-        low_duration = 2 * hardware_specs.ramp_duration + 1
-        high_duration = MAX_DURATION
-        cpt = 0
-
-        if hardware_specs.fields[name] <= 1e-3:
-            raise ValueError(
-                f"Hardware specs for pulse amplitude to low: amplitude={hardware_specs.fields[name]}"
-            )
-
-        while cpt < MAX_ITER and low_duration <= high_duration:
-            duration = low_duration + (high_duration - low_duration) // 2
-
-            if (
-                duration == prev_duration
-                and low_duration == prev_low
-                and high_duration == prev_high
-            ):
-                break
-
-            prev_duration = duration
-            prev_low = low_duration
-            prev_high = high_duration
-
-            amplitude_1 = 1
-            instruction = cls(
-                name, qubits, amplitude_1, sign, hardware_specs.ramp_duration, duration
-            )
-            angle_1 = instruction.to_angle()
-            if np.abs(angle_1) > 1e-15:
-                amplitude = np.abs(angle) / np.abs(angle_1)
-            else:
-                amplitude = high_duration
-            if amplitude < hardware_specs.fields[name] + 1e-10:
-                high_duration = duration - 1
-            else:
-                low_duration = duration + 1
-            cpt += 1
-
-        if cpt >= MAX_ITER:
-            print(
-                f"Warning: maximum of iterations reached for angle={angle}, duration={duration}"
-            )
-
-        instruction = cls(
-            name, qubits, amplitude, sign, hardware_specs.ramp_duration, duration
+        return super().from_angle(
+            name,
+            qubits,
+            angle,
+            hardware_specs,
+            2 * hardware_specs.ramp_duration + 1,
+            hardware_specs.ramp_duration,
         )
-
-        return instruction
 
     def eval(self, t):
         """Evaluate the square pulse envelope at the given time indices.
@@ -496,60 +504,15 @@ class GaussianRotationInstruction(RotationInstruction):
             GaussianRotationInstruction: A Gaussian pulse instruction that performs the requested angle within the hardware limits.
 
         """
-        sign = np.sign(angle)
 
-        # Evaluating the smallest pulse_duration available
-        prev_duration = -1
-        prev_low = -1
-        prev_high = -1
-        low_duration = 1
-        high_duration = MAX_DURATION
-        cpt = 0
-
-        if hardware_specs.fields[name] <= 1e-3:
-            raise ValueError(
-                f"Hardware specs for pulse amplitude to low: amplitude={hardware_specs.fields[name]}"
-            )
-
-        while cpt < MAX_ITER and low_duration <= high_duration:
-            duration = low_duration + (high_duration - low_duration) // 2
-
-            if (
-                duration == prev_duration
-                and low_duration == prev_low
-                and high_duration == prev_high
-            ):
-                break
-
-            prev_duration = duration
-            prev_low = low_duration
-            prev_high = high_duration
-
-            amplitude_1 = 1
-            instruction = cls(
-                name, qubits, amplitude_1, sign, hardware_specs.coeff_duration, duration
-            )
-            angle_1 = instruction.to_angle()
-            if np.abs(angle_1) > 1e-15:
-                amplitude = np.abs(angle) / np.abs(angle_1)
-            else:
-                amplitude = high_duration
-            if amplitude < hardware_specs.fields[name] + 1e-10:
-                high_duration = duration - 1
-            else:
-                low_duration = duration + 1
-            cpt += 1
-
-        if cpt >= MAX_ITER:
-            print(
-                f"Warning: maximum of iterations reached for angle={angle}, duration={duration}"
-            )
-
-        instruction = cls(
-            name, qubits, amplitude, sign, hardware_specs.coeff_duration, duration
+        return super().from_angle(
+            name,
+            qubits,
+            angle,
+            hardware_specs,
+            1,
+            hardware_specs.coeff_duration,
         )
-
-        return instruction
 
     def eval(self, t):
         """Evaluate the Gaussian pulse envelope at the given time indices.

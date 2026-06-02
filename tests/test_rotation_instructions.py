@@ -31,14 +31,12 @@ from spin_pulse.transpilation.instructions import (
 # -------------------------------------------------------------------
 
 
-def test_rotation_instruction_init_and_notimplemented_from_angle():
+def test_rotation_instruction_init():
     q = dm.DummyQubit(idx=3)
     r = RotationInstruction("x", [q], duration=5)
     assert r.name == "x"
     assert r.duration == 5
     assert r.qubits == [q]
-    with pytest.raises(NotImplementedError):
-        RotationInstruction.from_angle("x", [q], np.pi, dm.DummyHardwareSpecs())
 
 
 def test_to_pulse_and_to_angle_without_distortion(monkeypatch):
@@ -356,7 +354,8 @@ def test_from_angle_loop_termination(monkeypatch):
             SquareRotationInstruction, "to_angle", return_value=np.pi
         ) as mock_to_angle,
     ):
-        instr = SquareRotationInstruction.from_angle("x", [q], 50 * np.pi, hw)
+        with pytest.warns():
+            instr = SquareRotationInstruction.from_angle("x", [q], 50 * np.pi, hw)
         assert isinstance(instr, SquareRotationInstruction)
         assert mock_to_angle.call_count == N_iter
 
@@ -434,7 +433,6 @@ def test_gaussian_from_angle_max_iter_triggers_warning(capsys, monkeypatch):
         patch("spin_pulse.transpilation.instructions.rotations.MAX_ITER", 1),
         patch.object(GaussianRotationInstruction, "to_angle", return_value=0.0),
     ):
-        instr = GaussianRotationInstruction.from_angle("x", [q], np.pi, hw)
-        captured = capsys.readouterr()
-        assert "Warning" in captured.out
+        with pytest.warns():
+            instr = GaussianRotationInstruction.from_angle("x", [q], np.pi, hw)
         assert isinstance(instr, GaussianRotationInstruction)

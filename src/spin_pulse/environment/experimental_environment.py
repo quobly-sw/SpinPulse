@@ -13,6 +13,8 @@
 # --------------------------------------------------------------------------------------
 """Description of the noisy environment associated to a hardware."""
 
+import numpy as np
+
 from ..transpilation.hardware_specs import HardwareSpecs
 from .noise import (
     NoiseType,
@@ -156,3 +158,6 @@ class ExperimentalEnvironment:
                 f"  Coupling Time Traces Generated: {len(self.time_traces_coupling)}"
             )
         return "\n".join(summary)
+
+    def get_analytical_contrast(self, idle_duration: int | np.ndarray):
+        return self.time_traces[0].get_analytical_contrast(idle_duration)

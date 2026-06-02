@@ -214,6 +214,6 @@ def get_superop_from_paulidict(pauli_dict: dict[str, complex]) -> SuperOp:
 
     super_ops = []
     for label, coeff in pauli_dict.items():
-        P = Pauli(label)
+        P = Pauli(label[::-1])
         super_ops.append(coeff * SuperOp(P.to_matrix()))
     return sum(super_ops)

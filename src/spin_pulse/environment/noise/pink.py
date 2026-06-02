@@ -185,13 +185,18 @@ class PinkNoiseTimeTrace(NoiseTimeTrace):
         plt.plot(
             np.exp(-(t**2) / self.T2S**2), label=" $e^{-(t/T_2^*)^2}$", color="orange"
         )
-        T2_y = self.T2S / np.sqrt(
-            np.log(self.segment_duration / t[1:]) / np.log(self.segment_duration)
-        )
         plt.plot(
             t[1:],
-            np.exp(-(t[1:] ** 2) / T2_y**2),
+            self.get_analytical_contrast(t[1:]),
             label="$e^{-(t/T_2^*(t))^2}$",
             color="green",
         )
         super().plot_ramsey_contrast(ramsey_duration)
+
+    def get_analytical_contrast(self, idle_duration):
+        T2_t = self.T2S / np.sqrt(
+            np.log(self.segment_duration / idle_duration)
+            / np.log(self.segment_duration)
+        )
+        contrast = np.exp(-(idle_duration**2) / (T2_t**2))
+        return contrast
