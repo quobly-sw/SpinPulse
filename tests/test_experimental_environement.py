@@ -13,6 +13,7 @@
 # --------------------------------------------------------------------------------------
 """"""
 
+import numpy as np
 import pytest
 
 import tests.fixtures.dummy_objects as dm
@@ -130,3 +131,27 @@ def test_regenerate_time_traces_updates_length():
     env.generate_time_traces()
     assert len(env.time_traces) == 2
     assert env.time_traces is not old_traces
+
+
+def test_generate_time_traces_seeded():
+    """Verify seeded generate_time_traces generate correct unique trace for qubits."""
+    hw = dm.DummyHardwareSpecs(num_qubits=4)
+    env = ExperimentalEnvironment(hardware_specs=hw, seed=101010)
+    times_traces = env.time_traces
+    while times_traces:
+        trace_to_check = times_traces[0]
+        times_traces.remove(trace_to_check)
+        for trace in times_traces:
+            assert not np.array_equal(trace_to_check.values, trace.values)
+
+
+def test_generate_time_traces_coupling_seeded():
+    """Verify seeded generate_time_traces generate correct unique trace for qubits."""
+    hw = dm.DummyHardwareSpecs(num_qubits=4)
+    env = ExperimentalEnvironment(hardware_specs=hw, seed=101010, TJS=10)
+    times_traces = env.time_traces_coupling
+    while times_traces:
+        trace_to_check = times_traces[0]
+        times_traces.remove(trace_to_check)
+        for trace in times_traces:
+            assert not np.array_equal(trace_to_check.values, trace.values)

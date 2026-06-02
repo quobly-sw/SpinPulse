@@ -112,17 +112,19 @@ class ExperimentalEnvironment:
             If TJS is set, populate self.time_traces_coupling with one trace per pair of qubits (n-1 traces for n qubits).
         """
         self.time_traces = []
-        for _ in range(self.hardware_specs.num_qubits):
+        for index in range(self.hardware_specs.num_qubits):
+            qubit_seed = self.seed + index if self.seed is not None else None
             time_trace = self.noise_generator(
-                self.T2S, self.duration, self.segment_duration, seed=self.seed
+                self.T2S, self.duration, self.segment_duration, seed=qubit_seed
             )
             self.time_traces.append(time_trace)
 
         if self.TJS is not None:
             self.time_traces_coupling = []
-            for _ in range(self.hardware_specs.num_qubits - 1):
+            for index in range(self.hardware_specs.num_qubits - 1):
+                qubit_seed = self.seed + index if self.seed is not None else None
                 time_trace = self.noise_generator(
-                    self.TJS, self.duration, self.segment_duration, seed=self.seed
+                    self.TJS, self.duration, self.segment_duration, seed=qubit_seed
                 )
                 self.time_traces_coupling.append(time_trace)
 
