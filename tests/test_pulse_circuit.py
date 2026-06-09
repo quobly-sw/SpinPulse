@@ -623,3 +623,33 @@ def test_averaging_over_samples_num_samples():
 
     with pytest.warns(UserWarning, match="too high for a single instance"):
         pc.averaging_over_samples(func, env, num_samples=shots)
+
+
+def test_trivial_circuit():
+    from spin_pulse import HardwareSpecs, Shape
+
+    specs = HardwareSpecs(
+        num_qubits=3,
+        B_field=0.06,
+        delta=0.5,
+        J_coupling=0.001,
+        rotation_shape=Shape.GAUSSIAN,
+        ramp_duration=5,
+        coeff_duration=5,
+    )
+
+    circ = QuantumCircuit(2)
+    circ.rzz(0, 0, 1)
+    circ.rx(0, 0)
+
+    with pytest.warns(UserWarning) as record:
+        pc = PulseCircuit.from_circuit(circ, specs)
+
+    relevant = [w for w in record if "Replacing angle=0 rotations" in str(w.message)]
+    assert (
+        len(relevant) == 3
+    )  # Because the Rzz pass is automatically applied in PulseCircuit.from_dag_circuit
+
+    assert np.isclose(
+        pc.fidelity(circ), 1.0, atol=1e-8
+    )  # not exactly one because of non adiabatic effects

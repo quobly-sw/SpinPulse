@@ -88,31 +88,41 @@ def gate_to_pulse_sequences(
     if name_ in ["rx", "ry", "rz", "rzz"]:
         qubits = gate.qubits
         angle = gate.operation.params[0]
-        if name_ == "rzz":
-            heis_instruction = generator.from_angle(
-                "Heisenberg", qubits, angle, hardware_specs
-            )
-            pre_instruction = IdleInstruction(qubits, hardware_specs.ramp_duration)
-            post_instruction = IdleInstruction(qubits, hardware_specs.ramp_duration)
-            heis_sequence = PulseSequence(
-                [pre_instruction, heis_instruction, post_instruction]
-            )
-            twoq_pulse_sequences.append(heis_sequence)
-            duration = heis_sequence.duration
-            amplitude = hardware_specs.fields["z"]
-            detuned_instruction_0 = SquareRotationInstruction(
-                "z", [qubits[0]], amplitude, -1.0, ramp_duration, duration
-            )
-            detuned_instruction_1 = SquareRotationInstruction(
-                "z", [qubits[1]], amplitude, 1.0, ramp_duration, duration
-            )
-            oneq_pulse_sequences.append(PulseSequence([detuned_instruction_0]))
-            oneq_pulse_sequences.append(PulseSequence([detuned_instruction_1]))
+        if not np.isclose(angle, 0.0, atol=1e-12):
+            if name_ == "rzz":
+                heis_instruction = generator.from_angle(
+                    "Heisenberg", qubits, angle, hardware_specs
+                )
+                pre_instruction = IdleInstruction(qubits, hardware_specs.ramp_duration)
+                post_instruction = IdleInstruction(qubits, hardware_specs.ramp_duration)
+                heis_sequence = PulseSequence(
+                    [pre_instruction, heis_instruction, post_instruction]
+                )
+                twoq_pulse_sequences.append(heis_sequence)
+                duration = heis_sequence.duration
+                amplitude = hardware_specs.fields["z"]
+                detuned_instruction_0 = SquareRotationInstruction(
+                    "z", [qubits[0]], amplitude, -1.0, ramp_duration, duration
+                )
+                detuned_instruction_1 = SquareRotationInstruction(
+                    "z", [qubits[1]], amplitude, 1.0, ramp_duration, duration
+                )
+                oneq_pulse_sequences.append(PulseSequence([detuned_instruction_0]))
+                oneq_pulse_sequences.append(PulseSequence([detuned_instruction_1]))
+            else:
+                rotation_instruction = generator.from_angle(
+                    name_[1:], qubits, angle, hardware_specs
+                )
+                oneq_pulse_sequences.append(PulseSequence([rotation_instruction]))
         else:
-            rotation_instruction = generator.from_angle(
-                name_[1:], qubits, angle, hardware_specs
+            warnings.warn(
+                "Replacing angle=0 rotations with an idle instruction of duration 1."
             )
-            oneq_pulse_sequences.append(PulseSequence([rotation_instruction]))
+            for qubit in qubits:
+                oneq_pulse_sequences.append(
+                    PulseSequence([IdleInstruction([qubit], duration=1)])
+                )
+
     elif gate.operation.name in ["delay"]:
         duration = gate.operation.duration
         if duration == 0:
