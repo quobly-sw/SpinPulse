@@ -9,7 +9,7 @@
 #       format_version: '1.3'
 #       jupytext_version: 1.11.2
 #   kernelspec:
-#     display_name: .venv (3.12.3)
+#     display_name: spin-pulse (3.12.3)
 #     language: python
 #     name: python3
 # ---
@@ -177,6 +177,24 @@ print(
 
 # %% [markdown]
 # We can visualize the results with `plot_histogram` provided by `qiskit`. We observe that DD brings a significant improvement.
+
+# %% [markdown]
+# Note: When the number of shots is larger than the duration of the experimental environment. The function `run_experiment` internally generates several instances of the experimental environment.
+
+# %%
+n_samples = 2000
+
+exp_env = ExperimentalEnvironment(
+    hardware_specs=hardware_specs,
+    noise_type=NoiseType.PINK,
+    T2S=500,
+    duration=duration,
+    segment_duration=duration,
+    only_idle=False,
+)
+
+counts_pulse_qc_bv_noisy_withmoresamples = pulse_qc_bv_noisy.run_experiment(exp_env,num_samples=n_samples)
+
 
 # %%
 from qiskit.visualization import plot_histogram

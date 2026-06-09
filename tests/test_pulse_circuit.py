@@ -538,3 +538,88 @@ def test_attach_time_traces_two_qubit_operand_order(operands):
     pc = PulseCircuit.from_circuit(circ, specs, exp_env=env)
     pc.attach_time_traces(env)
     pc.attach_time_traces(env)
+    circ = QuantumCircuit(3)
+    circ.rzz(0.5, *operands)
+
+    # Must not raise; and re-attaching across "shots" must keep working.
+    pc = PulseCircuit.from_circuit(circ, specs, exp_env=env)
+    pc.attach_time_traces(env)
+    pc.attach_time_traces(env)
+
+
+def test_run_experiment():
+    from spin_pulse import ExperimentalEnvironment, HardwareSpecs, Shape
+    from spin_pulse.environment.noise import NoiseType
+
+    specs = HardwareSpecs(
+        num_qubits=3,
+        B_field=0.06,
+        delta=0.06,
+        J_coupling=0.003,
+        rotation_shape=Shape.GAUSSIAN,
+        ramp_duration=5,
+        coeff_duration=5,
+    )
+    env = ExperimentalEnvironment(
+        specs,
+        noise_type=NoiseType.PINK,
+        T2S=10_000,
+        TJS=5_000,
+        duration=2**12,
+        segment_duration=2**12,
+        seed=1,
+    )
+    circ = QuantumCircuit(2)
+    circ.rzz(0.5, 0, 1)
+
+    pc = PulseCircuit.from_circuit(circ, specs, exp_env=env)
+    shots_exp = pc.circuit_samples(env)
+    # trying to get more shots than permitted from a single time trace instance should be possible now
+    shots = 2 * shots_exp
+
+    # run_experiment() raises multiple UserWarnings internally; assert only the one relevant to this test
+    with pytest.warns(UserWarning) as record:
+        results = pc.run_experiment(env, num_samples=shots)
+
+    relevant = [w for w in record if "too high for a single instance" in str(w.message)]
+    assert len(relevant) == 1
+
+    actual_shots = sum(list(results.values()))
+    assert actual_shots == shots
+
+
+def test_averaging_over_samples_num_samples():
+    from spin_pulse import ExperimentalEnvironment, HardwareSpecs, Shape
+    from spin_pulse.environment.noise import NoiseType
+
+    specs = HardwareSpecs(
+        num_qubits=3,
+        B_field=0.06,
+        delta=0.06,
+        J_coupling=0.003,
+        rotation_shape=Shape.GAUSSIAN,
+        ramp_duration=5,
+        coeff_duration=5,
+    )
+    env = ExperimentalEnvironment(
+        specs,
+        noise_type=NoiseType.PINK,
+        T2S=10_000,
+        TJS=5_000,
+        duration=2**12,
+        segment_duration=2**12,
+        seed=1,
+    )
+    circ = QuantumCircuit(2)
+    circ.rzz(0.5, 0, 1)
+
+    pc = PulseCircuit.from_circuit(circ, specs, exp_env=env)
+    shots_exp = pc.circuit_samples(env)
+    # trying to get more shots than permitted from a single time trace instance should be possible now
+    shots = 2 * shots_exp
+
+    def func(pulse_circ):
+        return pulse_circ.fidelity(circ)
+
+    with pytest.warns(UserWarning, match="too high for a single instance"):
+        pc.averaging_over_samples(func, env, num_samples=shots)

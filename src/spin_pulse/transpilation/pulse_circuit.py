@@ -17,6 +17,7 @@ import warnings
 from collections import defaultdict
 
 import matplotlib.pyplot as plt
+import numpy as np
 from qiskit import QuantumCircuit
 from qiskit.circuit import Qubit
 from qiskit.converters import circuit_to_dag, dag_to_circuit
@@ -275,7 +276,7 @@ class PulseCircuit:
             nrows=nrows,
             height_ratios=height_ratios,
             width_ratios=width_ratios,
-            layout="constrained",
+            layout=None,
         )
 
         if hardware_specs is None:
@@ -288,91 +289,94 @@ class PulseCircuit:
             ymax_coupling = 1.5 * hardware_specs.fields["Heisenberg"]
 
         for ax in axs.flat:
+            ax.set_rasterization_zorder(0)
             ax.tick_params(left=False, bottom=False, labelleft=False, labelbottom=False)
 
         for j in range(self.n_layers):
             self.pulse_layers[j].plot(axs=axs[:-1, j], label_gates=label_gates)
-            for i in range(self.num_qubits):
-                axs[2 * i, j].set_ylim(-ymax_qubit, ymax_qubit)
-                for spine in axs[2 * i, j].spines.values():
-                    spine.set_alpha(0.1)
-            for i in range(self.num_qubits - 1):
-                axs[2 * i + 1, j].set_ylim(-ymax_coupling, ymax_coupling)
 
-                for spine in axs[2 * i + 1, j].spines.values():
+            for i in range(self.num_qubits):
+                ax_q = axs[2 * i, j]
+                ax_q.set_ylim(-ymax_qubit, ymax_qubit)
+                for spine in ax_q.spines.values():
                     spine.set_alpha(0.1)
-            axs[-1, j].set_axis_off()
+
+                if i < self.num_qubits - 1:
+                    ax_c = axs[2 * i + 1, j]
+                    ax_c.set_ylim(-ymax_coupling, ymax_coupling)
+                    for spine in ax_c.spines.values():
+                        spine.set_alpha(0.1)
+
+            ax_bottom = axs[-1, j]
+            ax_bottom.set_axis_off()
+
             if self.n_layers < 7:
-                if j == 0:
-                    axs[-1, j].text(
-                        0,
-                        1,
-                        f"Layer {j}",
-                        color="#24185E",
-                        fontsize=12,
-                        fontweight="bold",
-                    )
-                    axs[-1, j].text(
-                        0,
-                        -1,
-                        f"$t=${self.pulse_layers[j].t_start}",
-                        color="#24185E",
-                        fontsize=12,
-                    )
-                else:
-                    axs[-1, j].text(
-                        0, 1, f"L{j}", color="#24185E", fontsize=12, fontweight="bold"
-                    )
-                    axs[-1, j].text(
-                        0,
-                        -1,
-                        f"{self.pulse_layers[j].t_start}",
-                        color="#24185E",
-                        fontsize=12,
-                    )
+                is_first = j == 0
+                layer_text = f"Layer {j}" if is_first else f"L{j}"
+                t_text = (
+                    f"$t=${self.pulse_layers[j].t_start}"
+                    if is_first
+                    else f"{self.pulse_layers[j].t_start}"
+                )
+                font_weight = "bold" if is_first else "normal"
+
+                ax_bottom.text(
+                    0,
+                    1,
+                    layer_text,
+                    color="#24185E",
+                    fontsize=12,
+                    fontweight=font_weight,
+                )
+                ax_bottom.text(0, -1, t_text, color="#24185E", fontsize=12)
 
         for i in range(self.num_qubits):
-            axs[2 * i, -1].set_axis_off()
-            axs[2 * i, -1].text(
+            ax_q = axs[2 * i, -1]
+            ax_q.set_axis_off()
+            ax_q.set_xlim(-0.5, 0.5)
+            ax_q.set_ylim(-0.5, 0.5)
+            ax_q.text(
                 0.0, 0.2, f"qubit {i}", color="#E61873", fontsize=10, fontweight="bold"
             )
-            qubit_circle = plt.Circle((0, 0), 0.1, fc="#E61873")
-            axs[2 * i, -1].add_patch(qubit_circle)
-            qubit_triangle = plt.Polygon(
-                [[0, 0], [-0.5, 0.5], [-0.5, -0.5]],  # type: ignore
-                fc="#E61873",
-                alpha=0.5,
-            )
-            axs[2 * i, -1].add_patch(qubit_triangle)
+            ax_q.add_patch(plt.Circle((0, 0), 0.1, fc="#E61873"))
+            qubit_coords = np.array([[0, 0], [-0.5, 0.5], [-0.5, -0.5]])
+            ax_q.add_patch(plt.Polygon(qubit_coords, fc="#E61873", alpha=0.5))
 
-            axs[2 * i, -1].set_xlim(-0.5, 0.5)
-            axs[2 * i, -1].set_ylim(-0.5, 0.5)
-
-        for i in range(self.num_qubits - 1):
-            axs[2 * i + 1, -1].set_axis_off()
-            axs[2 * i + 1, -1].set_xlim(-0.5, 0.5)
-            axs[2 * i + 1, -1].set_ylim(-0.5, 0.5)
-            coupling_rectangle = plt.Polygon(
-                [[0.0, 0.5], [-0.1, 0.5], [-0.1, -0.5], [0.0, -0.5]], fc="#24185E"
-            )
-            axs[2 * i + 1, -1].add_patch(coupling_rectangle)
+            if i < self.num_qubits - 1:
+                ax_c = axs[2 * i + 1, -1]
+                ax_c.set_axis_off()
+                ax_c.set_xlim(-0.5, 0.5)
+                ax_c.set_ylim(-0.5, 0.5)
+                coupling_coords = np.array(
+                    [[0.0, 0.5], [-0.1, 0.5], [-0.1, -0.5], [0.0, -0.5]]
+                )
+                ax_c.add_patch(
+                    plt.Polygon(
+                        coupling_coords,
+                        fc="#24185E",
+                    )
+                )
 
         axs[-1, -1].set_axis_off()
 
-        logo_ax = fig.add_axes([0.9, 0.95, 0.1, 0.05])  # type: ignore  # [left, bottom, width, height]
-        logo_ax.axis("off")
-
-        logo_ax.text(
-            0, 0.5, "Spin", color="#24185E", fontsize=14, fontweight="bold", va="center"
+        fig.subplots_adjust(right=0.95, top=0.97)
+        fig.text(
+            0.92,
+            0.975,
+            "Spin",
+            color="#24185E",
+            fontsize=14,
+            fontweight="bold",
+            va="top",
         )
-        logo_ax.text(
-            0.37,
-            0.5,
+        fig.text(
+            0.965,
+            0.975,
             "Pulse",
             color="#E61873",
             fontsize=14,
             fontweight="bold",
-            va="center",
+            va="top",
         )
 
     def to_circuit(self, measure_all: bool = False) -> QuantumCircuit:
@@ -482,7 +486,6 @@ class PulseCircuit:
         r"""Estimate the average value over as many noisy samples as the experimental environment
         allows it, of a user-provided function using the pulse circuit.
 
-
         This method repeatedly attaches new pieces of the noise time traces from the
         experimental environment to the PulseCircuit and evaluates a
         user-provided function ``f(self, *args)`` for each realization. The
@@ -504,15 +507,13 @@ class PulseCircuit:
             Any: The sample-averaged value of ``f(self, *args)``.
 
         """
-        num_samples_exp_env = self.circuit_samples(exp_env)
         if num_samples is None:
-            num_samples = num_samples_exp_env
-        elif num_samples > num_samples_exp_env:
+            num_samples = self.circuit_samples(exp_env)
+        elif num_samples > self.circuit_samples(exp_env):
             warnings.warn(
-                f"You requested a number of samples ({num_samples}) to high for the experimental \
-                enviromnent specified. I will use {num_samples_exp_env} instead (maximum number possible)."
+                f"You requested a number of samples ({num_samples}) that is too high for a single instance of the experimental \
+                environment specified. I will use several generations of the time traces to compute the average"
             )
-            num_samples = num_samples_exp_env
 
         if num_samples == 0:
             raise ValueError(
@@ -521,7 +522,13 @@ class PulseCircuit:
             )
         self.t_lab = 0
         for i in tqdm(range(num_samples), disable=(not progress_bar)):
-            self.attach_time_traces(exp_env)
+            # If we reach the end of the time trace, we generate the another one and set the internal cursor to 0
+            if exp_env is not None:
+                if self.t_lab + self.duration > exp_env.duration:
+                    self.t_lab = 0
+                    exp_env.generate_time_traces()
+
+                self.attach_time_traces(exp_env)
             if i == 0:
                 f_sum = f(self, *args)
             else:
@@ -542,7 +549,6 @@ class PulseCircuit:
         experimental environment to the PulseCircuit and simulates with MPS method a single-shot measurement thanks to Qiskit Aer. The
         results are stored in a dictionary that gather the counts obtained for all possible bitstrings.
 
-
         Parameters:
             exp_env (ExperimentalEnvironment | None): Noise environment from
                 which time traces are drawn. If None, a single deterministic
@@ -556,15 +562,14 @@ class PulseCircuit:
             dict: A dictionary which keys are the obtained bitstrings and their respective number of occurences.
 
         """
-        num_samples_exp_env = self.circuit_samples(exp_env)
         if num_samples is None:
-            num_samples = num_samples_exp_env
-        elif num_samples > num_samples_exp_env:
+            num_samples = self.circuit_samples(exp_env)
+        elif num_samples > self.circuit_samples(exp_env):
             warnings.warn(
-                f"You requested a number of samples ({num_samples}) to high for the experimental \
-                enviromnent specified. I will use {num_samples_exp_env} instead (maximum number possible)."
+                f"You requested a number of samples ({num_samples}) that is too high for a single instance of the experimental \
+                environment specified. I will use several generations of the time traces to compute the average"
             )
-            num_samples = num_samples_exp_env
+
         if num_samples == 0:
             raise ValueError(
                 "Number of sample is 0. This is caused because the"
@@ -575,7 +580,13 @@ class PulseCircuit:
 
         simulator = AerSimulator()
         for _ in tqdm(range(num_samples), disable=(not progress_bar)):
-            self.attach_time_traces(exp_env)
+            # If we reach the end of the time trace, we generate the another one and set the internal cursor to 0
+            if exp_env is not None:
+                if self.t_lab + self.duration > exp_env.duration:
+                    self.t_lab = 0
+                    exp_env.generate_time_traces()
+
+                self.attach_time_traces(exp_env)
             circuit = self.to_circuit()
             circuit.measure_all()
 
