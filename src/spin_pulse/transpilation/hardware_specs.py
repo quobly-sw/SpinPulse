@@ -73,6 +73,8 @@ class HardwareSpecs:
         - dynamical_decoupling (DynamicalDecoupling | None): Optional
           dynamical decoupling sequence applied to idle qubits.
         - optim (int): Qiskit optimization level
+        - coupling_map (list[tuple[int,int]] | None): Coupling between qubits
+        - basis_gate (list[str]): Basis gate available for physical qubits.
 
     """
 
@@ -104,23 +106,22 @@ class HardwareSpecs:
             ramp_duration (int, optional): Duration of the pulse ramp for square pulse. Default is 1.
             coeff_duration (int, optional): Duration coefficient for Gaussian pulses. Default is 5.
             dynamical_decoupling (DynamicalDecoupling, optional): If not None, defines the dynamical decoupling sequence to be applied to Idle qubits.
+            optim (int): Optimization level for transpilation.
 
         """
 
         self.num_qubits: int = num_qubits
         self.J_coupling: float = J_coupling
 
+        self.coupling_map: list[tuple[int, int]] | None
         if num_qubits > 1:
-            coupling_map = [(i, i + 1) for i in range(num_qubits - 1)]
+            self.coupling_map = [(i, i + 1) for i in range(num_qubits - 1)]
         else:
-            coupling_map = None
+            self.coupling_map = None
         if num_qubits > 1:
-            basis_gates = ["rx", "ry", "rz", "rzz"]
+            self.basis_gates = ["rx", "ry", "rz", "rzz"]
         else:
-            basis_gates = ["rx", "ry", "rz"]
-        backend: GenericBackendV2 = GenericBackendV2(
-            num_qubits=num_qubits, coupling_map=coupling_map, basis_gates=basis_gates
-        )
+            self.basis_gates = ["rx", "ry", "rz"]
 
         if B_field < 1e-3:
             raise ValueError(f"B_field must be greater than 1e-3, got {B_field}")
@@ -155,14 +156,19 @@ class HardwareSpecs:
 
         self.ramp_duration: int = ramp_duration
 
+        self.dynamical_decoupling: DynamicalDecoupling | None = dynamical_decoupling
+
+        backend: GenericBackendV2 = GenericBackendV2(
+            num_qubits=num_qubits,
+            coupling_map=self.coupling_map,
+            basis_gates=self.basis_gates,
+        )
         self.first_pass = generate_preset_pass_manager(
             target=backend.target, optimization_level=optim
         )
         self.second_pass = PassManager(
             [RZZEchoPass(), Optimize1qGatesDecomposition(target=backend.target)]
         )
-
-        self.dynamical_decoupling: DynamicalDecoupling | None = dynamical_decoupling
 
     def gate_transpile(self, circ: QuantumCircuit) -> QuantumCircuit:
         """Transpile a quantum circuit into an ISA circuit using hardware specifications.

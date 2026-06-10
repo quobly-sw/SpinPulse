@@ -15,6 +15,7 @@
 
 import warnings
 from collections import defaultdict
+from typing import Callable
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -420,7 +421,7 @@ class PulseCircuit:
             duration of the experiment.
 
         """
-        if exp_env is not None:
+        if exp_env is not None and self.duration != 0:
             return exp_env.duration // self.duration
         else:
             return 1
@@ -541,6 +542,7 @@ class PulseCircuit:
         simulator=AerSimulator(),
         num_samples: int | None = None,
         progress_bar: bool = True,
+        seed_progression_function: Callable | None = None,
     ):
         """
         Simulate single-shot measurement on noisy instances of the circuit.
@@ -557,9 +559,10 @@ class PulseCircuit:
             num_samples (int | None): Number of samples to be used. Default if None,
                 in this case result of the circuit_samples function if taken.
             progress_bar (bool): if True, shows the progress. Default is True.
+            seed_progression_function (Callable | None ): Function(int) -> int to change the seed for each shots if needed.
 
         Returns:
-            dict: A dictionary which keys are the obtained bitstrings and their respective number of occurences.
+            dict: A dictionary which keys are the obtained bitstrings and their respective number of occurrences.
 
         """
         if num_samples is None:
@@ -577,8 +580,6 @@ class PulseCircuit:
             )
         self.t_lab = 0
         result: defaultdict[str, int] = defaultdict(int)
-
-        simulator = AerSimulator()
         for _ in tqdm(range(num_samples), disable=(not progress_bar)):
             # If we reach the end of the time trace, we generate the another one and set the internal cursor to 0
             if exp_env is not None:
@@ -591,6 +592,9 @@ class PulseCircuit:
             circuit.measure_all()
 
             counts = simulator.run(circuit, shots=1).result().get_counts()
+            if seed_progression_function:
+                new_seed = seed_progression_function(simulator.options.seed_simulator)
+                simulator.set_options(seed_simulator=new_seed)
             obtained_str = self.get_logical_bitstring(next(iter(counts.keys())))
             result[obtained_str] += 1
         return result
