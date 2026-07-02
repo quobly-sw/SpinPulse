@@ -13,7 +13,10 @@
 # --------------------------------------------------------------------------------------
 """Description of the noisy environment associated to a hardware."""
 
+import os
+
 import numpy as np
+from joblib import Parallel, delayed
 
 from ..transpilation.hardware_specs import HardwareSpecs
 from .noise import (
@@ -84,7 +87,14 @@ class ExperimentalEnvironment:
         self.TJS: float | None = TJS
         self.duration: int = duration
         self.segment_duration: int = segment_duration
+
         self.seed: int | None = seed
+        self._seed_sequence = (
+            np.random.SeedSequence(self.seed)
+            if self.seed is not None
+            else np.random.SeedSequence()
+        )
+
         match noise_type:
             case NoiseType.PINK:
                 self.noise_generator = PinkNoiseTimeTrace
@@ -98,9 +108,34 @@ class ExperimentalEnvironment:
         self.only_idle = only_idle
         self.generate_time_traces()
 
-    def generate_time_traces(self):
+    def _generate_time_trace_on_qubit(self, seed: int):
+        """Generate the time trace for one qubit."""
+        return self.noise_generator(
+            self.T2S,
+            self.duration,
+            self.segment_duration,
+            seed=seed,  # type: ignore
+        )
+
+    def _generate_coupling_time_trace_on_qubit(self, seed: int):
+        """Generate the coupling time trace for one qubit."""
+        assert self.TJS is not None, (
+            "self.TJS cannot be None when generating coupling traces."
+        )
+
+        return self.noise_generator(
+            self.TJS,
+            self.duration,
+            self.segment_duration,
+            seed=seed,  # type: ignore
+        )
+
+    def generate_time_traces(self, n_jobs: int = 1):
         """
         Generate noise time traces for each qubit's frequency and J coupling to each pair of qubits if TJS is defined.
+
+        Parameters:
+            n_jobs (int): Number of core used to generate the time trace.
 
         Behavior:
             For each qubit, instantiate a noise generator using the selected noise_type.
@@ -110,23 +145,35 @@ class ExperimentalEnvironment:
         Effects:
             Populate self.time_traces with one noise trace per qubit.
             If TJS is set, populate self.time_traces_coupling with one trace per pair of qubits (n-1 traces for n qubits).
+
         """
-        self.time_traces = []
-        for index in range(self.hardware_specs.num_qubits):
-            qubit_seed = self.seed + index if self.seed is not None else None
-            time_trace = self.noise_generator(
-                self.T2S, self.duration, self.segment_duration, seed=qubit_seed
-            )
-            self.time_traces.append(time_trace)
+
+        n_jobs = min(n_jobs, os.cpu_count() or 1)
+
+        # Spawn two child SeedSequences (one for qubit traces, one for coupling traces).
+        # Each call to .spawn() yield independent streams, even though the root's
+        # entropy (derived from self.seed) is unchanged.
+        qubit_root, coupling_root = self._seed_sequence.spawn(2)
+        qubit_seeds: list[np.random.SeedSequence] = list(
+            qubit_root.spawn(self.hardware_specs.num_qubits)
+        )
+
+        self.time_traces = Parallel(n_jobs=n_jobs)(
+            delayed(self._generate_time_trace_on_qubit)(qubit_seeds[index])
+            for index in range(self.hardware_specs.num_qubits)
+        )
 
         if self.TJS is not None:
-            self.time_traces_coupling = []
-            for index in range(self.hardware_specs.num_qubits - 1):
-                qubit_seed = self.seed + index if self.seed is not None else None
-                time_trace = self.noise_generator(
-                    self.TJS, self.duration, self.segment_duration, seed=qubit_seed
+            coupling_seeds: list[np.random.SeedSequence] = list(
+                coupling_root.spawn(self.hardware_specs.num_qubits - 1)
+            )
+
+            self.time_traces_coupling = Parallel(n_jobs=n_jobs)(
+                delayed(self._generate_coupling_time_trace_on_qubit)(
+                    coupling_seeds[index]
                 )
-                self.time_traces_coupling.append(time_trace)
+                for index in range(self.hardware_specs.num_qubits - 1)
+            )
 
     def __str__(self):
         """

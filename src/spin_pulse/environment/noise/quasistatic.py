@@ -38,7 +38,7 @@ class QuasistaticNoiseTimeTrace(NoiseTimeTrace):
     """
 
     def __init__(
-        self, T2S: int, duration: int, segment_duration: int, seed: int | None = None
+        self, T2S: float, duration: int, segment_duration: int, seed: int | None = None
     ):
         r"""Initialize a quasi-static Gaussian noise trace.
 
