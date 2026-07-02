@@ -121,7 +121,7 @@ class PinkNoiseTimeTrace(NoiseTimeTrace):
     """
 
     def __init__(
-        self, T2S: int, duration: int, segment_duration: int, seed: int | None = None
+        self, T2S: float, duration: int, segment_duration: int, seed: int | None = None
     ):
         """Create a pink noise time trace for spin qubit simulations.
 

@@ -13,12 +13,14 @@
 # --------------------------------------------------------------------------------------
 """Pulse-level representation of a quantum circuit."""
 
+import os
 import warnings
 from collections import defaultdict
 from typing import Callable
 
 import matplotlib.pyplot as plt
 import numpy as np
+from joblib import Parallel, delayed
 from qiskit import QuantumCircuit
 from qiskit.circuit import Qubit
 from qiskit.converters import circuit_to_dag, dag_to_circuit
@@ -421,10 +423,14 @@ class PulseCircuit:
             duration of the experiment.
 
         """
-        if exp_env is not None and self.duration != 0:
-            return exp_env.duration // self.duration
-        else:
+
+        if exp_env is None:
             return 1
+
+        if self.duration == 0:
+            return exp_env.duration
+
+        return exp_env.duration // self.duration
 
     def get_logical_bitstring(self, physical_bistring: str) -> str:
         """
@@ -539,10 +545,11 @@ class PulseCircuit:
     def run_experiment(
         self,
         exp_env: ExperimentalEnvironment,
-        simulator=AerSimulator(),
+        simulator: AerSimulator = AerSimulator(),
         num_samples: int | None = None,
         progress_bar: bool = True,
         seed_progression_function: Callable | None = None,
+        n_jobs: int = 1,
     ):
         """
         Simulate single-shot measurement on noisy instances of the circuit.
@@ -559,15 +566,20 @@ class PulseCircuit:
             num_samples (int | None): Number of samples to be used. Default if None,
                 in this case result of the circuit_samples function if taken.
             progress_bar (bool): if True, shows the progress. Default is True.
-            seed_progression_function (Callable | None ): Function(int) -> int to change the seed for each shots if needed.
-
+            seed_progression_function (Callable | None): Function(int) -> int to change the seed
+                for each shots if needed. The simulator need to be seeded first.
+            n_jobs (int): Number of core to be used for simulation and time trace generation.
         Returns:
             dict: A dictionary which keys are the obtained bitstrings and their respective number of occurrences.
 
         """
+
+        n_jobs = min(n_jobs, os.cpu_count() or 1)
+        number_of_sample_max_per_duration = self.circuit_samples(exp_env)
+
         if num_samples is None:
-            num_samples = self.circuit_samples(exp_env)
-        elif num_samples > self.circuit_samples(exp_env):
+            num_samples = number_of_sample_max_per_duration
+        elif num_samples > number_of_sample_max_per_duration:
             warnings.warn(
                 f"You requested a number of samples ({num_samples}) that is too high for a single instance of the experimental \
                 environment specified. I will use several generations of the time traces to compute the average"
@@ -578,26 +590,59 @@ class PulseCircuit:
                 "Number of sample is 0. This is caused because the"
                 " duration of the circuit is greater than environment duration."
             )
+
         self.t_lab = 0
         result: defaultdict[str, int] = defaultdict(int)
-        for _ in tqdm(range(num_samples), disable=(not progress_bar)):
-            # If we reach the end of the time trace, we generate the another one and set the internal cursor to 0
-            if exp_env is not None:
-                if self.t_lab + self.duration > exp_env.duration:
+
+        num_samples_done = 0  # total number of sample done
+        sample_done = 0  # sample done for this time trace.
+        if seed_progression_function:
+            pre_seed = simulator.options.seed_simulator
+        else:
+            pre_seed = None
+
+        while num_samples_done < num_samples:
+            job_to_be_done_this_loop = min(n_jobs, num_samples - num_samples_done)
+            # If we are out of time trace, we stop and regenerate
+            if sample_done + n_jobs >= number_of_sample_max_per_duration:
+                sample_done = 0
+                if exp_env is not None:
                     self.t_lab = 0
-                    exp_env.generate_time_traces()
+                    exp_env.generate_time_traces(n_jobs=n_jobs)
 
-                self.attach_time_traces(exp_env)
-            circuit = self.to_circuit()
-            circuit.measure_all()
-
-            counts = simulator.run(circuit, shots=1).result().get_counts()
+            seed_array = None
             if seed_progression_function:
-                new_seed = seed_progression_function(simulator.options.seed_simulator)
-                simulator.set_options(seed_simulator=new_seed)
-            obtained_str = self.get_logical_bitstring(next(iter(counts.keys())))
-            result[obtained_str] += 1
+                seed_array = []
+                for _ in range(job_to_be_done_this_loop):
+                    seed_array.append(pre_seed)
+                    pre_seed = seed_progression_function(pre_seed)
+
+            counts = Parallel(n_jobs=job_to_be_done_this_loop)(
+                delayed(self._run_simulation)(
+                    simulator, exp_env, seed_array[ind] if seed_array else None
+                )
+                for ind in range(job_to_be_done_this_loop)
+            )
+
+            sample_done += job_to_be_done_this_loop
+            for issus in counts:
+                obtained_str = self.get_logical_bitstring(next(iter(issus.keys())))
+                result[obtained_str] += 1
+
+            num_samples_done += job_to_be_done_this_loop
+
         return result
+
+    def _run_simulation(
+        self,
+        simulator: AerSimulator,
+        exp_env: ExperimentalEnvironment,
+        seed: int | None = None,
+    ):
+        self.attach_time_traces(exp_env)
+        circuit = self.to_circuit(measure_all=True)
+        res = simulator.run(circuit, shots=1, seed_simulator=seed).result().get_counts()
+        return res
 
     def fidelity(self, circ_ref: QuantumCircuit | None = None) -> float:
         """Compute the average gate fidelity with respect to a reference circuit.

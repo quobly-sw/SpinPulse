@@ -13,5 +13,11 @@
 # --------------------------------------------------------------------------------------
 """"""
 
+import matplotlib
+
 from tests.fixtures.pulse_circuit_fixtures import *  # noqa: F403
 from tests.fixtures.utils_fixtures import *  # noqa: F403
+
+matplotlib.use(
+    "Agg"
+)  # To avoid RuntimeError: main thread is not in main loop from tkinter

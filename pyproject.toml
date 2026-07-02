@@ -55,6 +55,7 @@
     "llvmlite>=0.46",
     "numba>=0.63",
     "quimb>=1.10",
+    "joblib"
   ]
 
   [project.urls]
@@ -66,6 +67,7 @@
     "jupyterlab",
     "qiskit_aer",
     "qiskit_experiments",
+    "joblib"
   ]
   test = [
     "pytest>=8",
@@ -176,6 +178,7 @@ del version
         "setuptools_scm.*",
         "quimb",
         "quimb.*",
+        "joblib.*",
       ]
       ignore_missing_imports = true
 

@@ -588,6 +588,105 @@ def test_run_experiment():
     assert actual_shots == shots
 
 
+def test_run_experiment_multi_core():
+    from spin_pulse import ExperimentalEnvironment, HardwareSpecs, Shape
+    from spin_pulse.environment.noise import NoiseType
+
+    specs = HardwareSpecs(
+        num_qubits=3,
+        B_field=0.06,
+        delta=0.06,
+        J_coupling=0.003,
+        rotation_shape=Shape.GAUSSIAN,
+        ramp_duration=5,
+        coeff_duration=5,
+    )
+    env = ExperimentalEnvironment(
+        specs,
+        noise_type=NoiseType.PINK,
+        T2S=10_000,
+        TJS=5_000,
+        duration=2**12,
+        segment_duration=2**12,
+        seed=1,
+    )
+    circ = QuantumCircuit(2)
+    circ.rzz(0.5, 0, 1)
+
+    pc: PulseCircuit = PulseCircuit.from_circuit(circ, specs, exp_env=env)
+    shots_exp = pc.circuit_samples(env)
+    # trying to get more shots than permitted from a single time trace instance should be possible now
+    shots = 2 * shots_exp
+
+    # run_experiment() raises multiple UserWarnings internally; assert only the one relevant to this test
+    with pytest.warns(UserWarning) as record:
+        results = pc.run_experiment(env, num_samples=shots, n_jobs=4)
+
+    relevant = [w for w in record if "too high for a single instance" in str(w.message)]
+    assert len(relevant) == 1
+
+    actual_shots = sum(list(results.values()))
+    assert actual_shots == shots
+
+
+def test_run_experiment_multi_core_seed():
+    from qiskit_aer import AerSimulator
+
+    from spin_pulse import ExperimentalEnvironment, HardwareSpecs, Shape
+    from spin_pulse.environment.noise import NoiseType
+
+    specs = HardwareSpecs(
+        num_qubits=3,
+        B_field=0.06,
+        delta=0.06,
+        J_coupling=0.003,
+        rotation_shape=Shape.GAUSSIAN,
+        ramp_duration=5,
+        coeff_duration=5,
+    )
+    env = ExperimentalEnvironment(
+        specs,
+        noise_type=NoiseType.PINK,
+        T2S=10_000,
+        TJS=5_000,
+        duration=2**12,
+        segment_duration=2**12,
+        seed=1,
+    )
+    circ = QuantumCircuit(2)
+    circ.rx(3.6, 0)
+    circ.rx(1.5, 0)
+    circ.ry(3.6, 1)
+    circ.rx(1.5, 1)
+
+    pc: PulseCircuit = PulseCircuit.from_circuit(circ, specs, exp_env=env)
+    shots_exp = pc.circuit_samples(env)
+    # trying to get more shots than permitted from a single time trace instance should be possible now
+    shots = 2 * shots_exp
+
+    # run_experiment() raises multiple UserWarnings internally; assert only the one relevant to this test
+
+    def seed_func(old_value):
+        return old_value + 70
+
+    with pytest.warns(UserWarning):
+        r1 = pc.run_experiment(
+            env,
+            simulator=AerSimulator(seed_simulator=10),
+            num_samples=shots,
+            seed_progression_function=seed_func,
+            n_jobs=4,
+        )
+        r2 = pc.run_experiment(
+            env,
+            simulator=AerSimulator(seed_simulator=10),
+            num_samples=shots,
+            seed_progression_function=seed_func,
+            n_jobs=4,
+        )
+    assert r1 == r2
+
+
 def test_averaging_over_samples_num_samples():
     from spin_pulse import ExperimentalEnvironment, HardwareSpecs, Shape
     from spin_pulse.environment.noise import NoiseType
@@ -653,3 +752,35 @@ def test_trivial_circuit():
     assert np.isclose(
         pc.fidelity(circ), 1.0, atol=1e-8
     )  # not exactly one because of non adiabatic effects
+
+
+def test_run_experiment_tlab_increments():
+    from spin_pulse import ExperimentalEnvironment, HardwareSpecs, Shape
+    from spin_pulse.environment.noise import NoiseType
+
+    specs = HardwareSpecs(
+        num_qubits=3,
+        B_field=0.06,
+        delta=0.06,
+        J_coupling=0.003,
+        rotation_shape=Shape.GAUSSIAN,
+        ramp_duration=5,
+        coeff_duration=5,
+    )
+    env = ExperimentalEnvironment(
+        specs,
+        noise_type=NoiseType.PINK,
+        T2S=10_000,
+        TJS=5_000,
+        duration=2**12,
+        segment_duration=2**12,
+    )
+    circ = QuantumCircuit(2)
+    circ.rx(3.6, 0)
+    circ.rx(1.5, 0)
+    circ.ry(3.6, 1)
+    circ.rx(1.5, 1)
+    circ_isa = specs.gate_transpile(circ)
+    pc: PulseCircuit = PulseCircuit.from_circuit(circ_isa, specs, exp_env=env)
+    pc.run_experiment(env, num_samples=1)
+    assert pc.t_lab == pc.duration

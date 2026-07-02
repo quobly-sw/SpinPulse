@@ -55,7 +55,7 @@ def test_seeded_circuit(duration, segment_duration, noise):
         seed=100,
     )
 
-    ### Testing time trace
+    ### Testing time trace (across fresh instances with same seed)
     assert len(exp_env1.time_traces_coupling) == len(exp_env2.time_traces_coupling)
     assert len(exp_env1.time_traces) == len(exp_env2.time_traces)
 
@@ -64,6 +64,29 @@ def test_seeded_circuit(duration, segment_duration, noise):
 
     for tt_1, tt_2 in zip(exp_env1.time_traces_coupling, exp_env2.time_traces_coupling):
         assert array_equal(tt_1.values, tt_2.values)
+
+    ### Testing no seed collision across qubits within a single instance
+    qubit_values = [tt.values for tt in exp_env1.time_traces]
+    for i in range(len(qubit_values)):
+        for j in range(i + 1, len(qubit_values)):
+            assert not array_equal(qubit_values[i], qubit_values[j]), (
+                f"Qubit {i} and qubit {j} time traces are identical: seed collision across qubits."
+            )
+
+    coupling_values = [tt.values for tt in exp_env1.time_traces_coupling]
+    for i in range(len(coupling_values)):
+        for j in range(i + 1, len(coupling_values)):
+            assert not array_equal(coupling_values[i], coupling_values[j]), (
+                f"Coupling pair {i} and {j} time traces are identical: seed collision across coupling pairs."
+            )
+
+    ### Testing no collision between qubit traces and coupling traces
+    for i, qv in enumerate(qubit_values):
+        for j, cv in enumerate(coupling_values):
+            if qv.shape == cv.shape:
+                assert not array_equal(qv, cv), (
+                    f"Qubit {i} trace collides with coupling trace {j}."
+                )
 
     ### Testing from_circuit
     circuit = QuantumCircuit(4)
@@ -104,6 +127,22 @@ def test_seeded_circuit(duration, segment_duration, noise):
     )
 
     assert array_equal(r1, r2)
+
+    ### Calling generate_time_traces() twice on the same seeded instance must NOT silently reproduce the same traces
+    prev_traces = [tt.values.copy() for tt in exp_env1.time_traces]
+    prev_coupling = [tt.values.copy() for tt in exp_env1.time_traces_coupling]
+
+    exp_env1.generate_time_traces(n_jobs=1)
+
+    for prev, new in zip(prev_traces, exp_env1.time_traces):
+        assert not array_equal(prev, new.values), (
+            "Qubit time traces are identical across successive generate_time_traces() calls on the same instance: seed sequence is not advancing."
+        )
+
+    for prev, new in zip(prev_coupling, exp_env1.time_traces_coupling):
+        assert not array_equal(prev, new.values), (
+            "Coupling time traces are identical across successive generate_time_traces() calls on the same instance: seed sequence is not advancing."
+        )
 
 
 def test_bistring_conversion_smaller_qubit_than_qpu_max():
