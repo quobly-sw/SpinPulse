@@ -82,7 +82,7 @@ class NoiseTimeTrace:
         i_min = 0
         for _ in range(n_exp):
             omega = self.values[i_min : i_min + ramsey_duration]
-            contrast += np.real(np.exp(-1j * np.cumsum(omega))) / n_exp
+            contrast += np.real(np.exp(-1j * np.cumsum(omega))) / n_exp # type: ignore
             i_min += ramsey_duration
 
         return contrast
