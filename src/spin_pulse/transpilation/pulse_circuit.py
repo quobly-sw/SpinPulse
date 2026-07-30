@@ -617,16 +617,26 @@ class PulseCircuit:
                     seed_array.append(pre_seed)
                     pre_seed = seed_progression_function(pre_seed)
 
-            counts = Parallel(n_jobs=job_to_be_done_this_loop)(
+            base_sample_done = sample_done
+
+            counts = Parallel(n_jobs=job_to_be_done_this_loop, backend="loky")(
                 delayed(self._run_simulation)(
-                    simulator, exp_env, seed_array[ind] if seed_array else None
+                    simulator,
+                    exp_env,
+                    seed_array[ind] if seed_array else None,
+                    ind,
+                    base_sample_done,
                 )
                 for ind in range(job_to_be_done_this_loop)
             )
+            # Note that the returned PulseCircuit instance corresponds to the last job execution inside Parallel,
+            # , i.e., the slowest one
 
             sample_done += job_to_be_done_this_loop
-            for issus in counts:
-                obtained_str = self.get_logical_bitstring(next(iter(issus.keys())))
+            self.t_lab = sample_done * self.duration
+
+            for count in counts:
+                obtained_str = self.get_logical_bitstring(next(iter(count.keys())))
                 result[obtained_str] += 1
 
             num_samples_done += job_to_be_done_this_loop
@@ -638,7 +648,11 @@ class PulseCircuit:
         simulator: AerSimulator,
         exp_env: ExperimentalEnvironment,
         seed: int | None = None,
+        cpu_index=0,
+        base_sample_done=0,
     ):
+        self.t_lab = (base_sample_done + cpu_index) * self.duration
+        # this guarantees by incrementation a unique t_lab for all n_samples circuit executions
         self.attach_time_traces(exp_env)
         circuit = self.to_circuit(measure_all=True)
         res = simulator.run(circuit, shots=1, seed_simulator=seed).result().get_counts()

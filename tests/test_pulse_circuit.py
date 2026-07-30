@@ -548,6 +548,7 @@ def test_attach_time_traces_two_qubit_operand_order(operands):
 
 
 def test_run_experiment():
+    """Test that run_experiment produces the correct total shot count when num_samples exceeds a single time trace instance, triggering time trace regeneration."""
     from spin_pulse import ExperimentalEnvironment, HardwareSpecs, Shape
     from spin_pulse.environment.noise import NoiseType
 
@@ -589,6 +590,7 @@ def test_run_experiment():
 
 
 def test_run_experiment_multi_core():
+    """Test that run_experiment produces the correct total shot count when using multiple cores (n_jobs > 1) with time trace regeneration."""
     from spin_pulse import ExperimentalEnvironment, HardwareSpecs, Shape
     from spin_pulse.environment.noise import NoiseType
 
@@ -630,6 +632,7 @@ def test_run_experiment_multi_core():
 
 
 def test_run_experiment_multi_core_seed():
+    """Test that run_experiment produces identical results across repeated calls when using a seed_progression_function with multiple cores."""
     from qiskit_aer import AerSimulator
 
     from spin_pulse import ExperimentalEnvironment, HardwareSpecs, Shape
@@ -688,6 +691,7 @@ def test_run_experiment_multi_core_seed():
 
 
 def test_averaging_over_samples_num_samples():
+    """Test that averaging_over_samples correctly warns when num_samples exceeds a single time trace instance."""
     from spin_pulse import ExperimentalEnvironment, HardwareSpecs, Shape
     from spin_pulse.environment.noise import NoiseType
 
@@ -755,6 +759,7 @@ def test_trivial_circuit():
 
 
 def test_run_experiment_tlab_increments():
+    """Test that t_lab advances by the correct total offset after run_experiment, both on the single-core and multi-core paths."""
     from spin_pulse import ExperimentalEnvironment, HardwareSpecs, Shape
     from spin_pulse.environment.noise import NoiseType
 
@@ -782,5 +787,59 @@ def test_run_experiment_tlab_increments():
     circ.rx(1.5, 1)
     circ_isa = specs.gate_transpile(circ)
     pc: PulseCircuit = PulseCircuit.from_circuit(circ_isa, specs, exp_env=env)
+
+    # Single core path
     pc.run_experiment(env, num_samples=1)
     assert pc.t_lab == pc.duration
+
+    # Multiple core path
+    n_jobs = 4
+    num_samples = 2 * n_jobs  # running two ParallelLib loops
+    assert pc.circuit_samples(env) >= num_samples  # no time trace regeneration
+
+    pc.run_experiment(env, num_samples=num_samples, n_jobs=n_jobs)
+    assert pc.t_lab >= (num_samples - n_jobs + 1) * pc.duration
+    # Test that the circuit cursors t_lab have been assigned during the last run of Parallel
+    # The last run of Parallel creates n_jobs instances.
+    # If the slowest job corresponds to the first job index==0, we have
+    #  pc.tlab = (num_samples-n_jobs+1) * pc.duration.
+    # Otherwise, it's even larger
+
+
+def test_run_experiment_tlab_valid_after_regeneration_multi_core():
+    """Test that t_lab remains within valid bounds and reusable after a time trace regeneration occurs during a multi-core run_experiment call."""
+    from spin_pulse import ExperimentalEnvironment, HardwareSpecs, Shape
+    from spin_pulse.environment.noise import NoiseType
+
+    specs = HardwareSpecs(
+        num_qubits=3,
+        B_field=0.06,
+        delta=0.06,
+        J_coupling=0.003,
+        rotation_shape=Shape.GAUSSIAN,
+        ramp_duration=5,
+        coeff_duration=5,
+    )
+    env = ExperimentalEnvironment(
+        specs,
+        noise_type=NoiseType.PINK,
+        T2S=10_000,
+        TJS=5_000,
+        duration=2**12,
+        segment_duration=2**12,
+        seed=1,
+    )
+    circ = QuantumCircuit(2)
+    circ.rzz(0.5, 0, 1)
+
+    pc = PulseCircuit.from_circuit(circ, specs, exp_env=env)
+
+    shots_exp = pc.circuit_samples(env)
+    n_jobs = 4
+    shots = 2 * shots_exp  # forces at least one regeneration
+    with pytest.warns(UserWarning):
+        pc.run_experiment(env, num_samples=shots, n_jobs=n_jobs)
+
+    assert 0 <= pc.t_lab
+    assert pc.t_lab + pc.duration <= env.duration + pc.duration
+    pc.attach_time_traces(env)  # should not raise ValueError
