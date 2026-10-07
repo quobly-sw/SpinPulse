@@ -1,4 +1,5 @@
 # --------------------------------------------------------------------------------------
+# Modified by qBraid in 2026: optional disk-backed pink noise histories.
 # This code is part of SpinPulse.
 #
 # (C) Copyright Quobly 2025.
@@ -63,6 +64,8 @@ class ExperimentalEnvironment:
         only_idle: bool = False,
         segment_duration: int = 2**10,
         seed: int | None = None,
+        *,
+        noise_directory: str | os.PathLike | None = None,
     ):
         """
         Initialize the ExperimentalEnvironment with specified noise characteristics and simulation parameters.
@@ -76,6 +79,11 @@ class ExperimentalEnvironment:
             only_idle (bool): Flag to apply noise only to idle qubits.
             segment_duration (int): Duration of each noise segment; used to partition the time trace.
             seed (int or None): seed integer for random number generation. If not specified, no seed used.
+            noise_directory: Existing disk directory for temporary pink-noise
+                histories and FFT arrays. Files are reclaimed when the arrays
+                and their views are released. Parallel generation uses threads
+                to avoid copying mapped arrays between worker processes. Each
+                concurrent worker still needs its own FFT workspace.
         Raises:
             ValueError: If an invalid noise_type is provided.
 
@@ -87,6 +95,9 @@ class ExperimentalEnvironment:
         self.TJS: float | None = TJS
         self.duration: int = duration
         self.segment_duration: int = segment_duration
+        if noise_directory is not None and noise_type is not NoiseType.PINK:
+            raise ValueError("noise_directory is supported only for pink noise")
+        self.noise_directory = noise_directory
 
         self.seed: int | None = seed
         self._seed_sequence = (
@@ -110,8 +121,19 @@ class ExperimentalEnvironment:
 
     def _generate_time_trace_on_qubit(self, seed: int):
         """Generate the time trace for one qubit."""
+        return self._generate_trace(self.T2S, seed)
+
+    def _generate_trace(self, coherence_time: float, seed):
+        if self.noise_directory is not None:
+            return PinkNoiseTimeTrace(
+                coherence_time,
+                self.duration,
+                self.segment_duration,
+                seed=seed,
+                noise_directory=self.noise_directory,
+            )
         return self.noise_generator(
-            self.T2S,
+            coherence_time,
             self.duration,
             self.segment_duration,
             seed=seed,  # type: ignore
@@ -123,12 +145,7 @@ class ExperimentalEnvironment:
             "self.TJS cannot be None when generating coupling traces."
         )
 
-        return self.noise_generator(
-            self.TJS,
-            self.duration,
-            self.segment_duration,
-            seed=seed,  # type: ignore
-        )
+        return self._generate_trace(self.TJS, seed)
 
     def generate_time_traces(self, n_jobs: int = 1):
         """
@@ -158,7 +175,10 @@ class ExperimentalEnvironment:
             qubit_root.spawn(self.hardware_specs.num_qubits)
         )
 
-        self.time_traces = Parallel(n_jobs=n_jobs)(
+        parallel_options = (
+            {"prefer": "threads"} if self.noise_directory is not None else {}
+        )
+        self.time_traces = Parallel(n_jobs=n_jobs, **parallel_options)(
             delayed(self._generate_time_trace_on_qubit)(qubit_seeds[index])
             for index in range(self.hardware_specs.num_qubits)
         )
@@ -168,7 +188,7 @@ class ExperimentalEnvironment:
                 coupling_root.spawn(self.hardware_specs.num_qubits - 1)
             )
 
-            self.time_traces_coupling = Parallel(n_jobs=n_jobs)(
+            self.time_traces_coupling = Parallel(n_jobs=n_jobs, **parallel_options)(
                 delayed(self._generate_coupling_time_trace_on_qubit)(
                     coupling_seeds[index]
                 )

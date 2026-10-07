@@ -29,6 +29,55 @@ The API documentation can be found at [APIdoc](https://quobly-sw.github.io/SpinP
 
 Detailed information on our model and the code structure is presented in our [publication](https://arxiv.org/abs/2601.10435)
 
+## Large pink-noise environments
+
+Long experiments can keep noise histories on disk by passing an existing disk
+directory to `ExperimentalEnvironment`:
+
+```python
+env = ExperimentalEnvironment(
+    hardware_specs=specs,
+    T2S=10_000,
+    TJS=5_000,
+    duration=experiment_duration,
+    segment_duration=experiment_duration,
+    seed=42,
+    noise_directory="/path/to/job-scratch",
+)
+```
+
+The trace values are NumPy `memmap` arrays, so pulse circuits continue to read
+the same windows from the full history. This preserves correlations across
+shots, the spectral amplitudes, random phase stream, trace duration,
+low-frequency cutoff, and noise normalization. The exact-length FFT is split
+into smaller transforms without changing the time grid or precision
+(`complex128` transforms and `float64` samples). Different FFT evaluation order
+can change the last few floating-point bits; bitwise identity with earlier
+versions, including a seeded measurement exactly at a sampling boundary, is
+not guaranteed.
+
+The default remains in-memory storage. Both modes avoid full-size phase and
+variance temporaries and concatenation copies. Disk mode also stores the FFT
+spectrum on disk. Memory still depends on the largest constituent FFT and the
+number of concurrent workers; it is not constant for every trace length.
+Clean mapped pages are reclaimable by the operating system under memory
+pressure. A RAM-backed filesystem such as tmpfs does not provide these savings.
+
+Allow disk space for eight bytes per sample per retained trace, plus a
+sixteen-byte-per-sample FFT spectrum and any additional segment needed when
+`duration != segment_duration`. Pink noise has one frequency trace per qubit
+and, when `TJS` is set, one coupling trace per neighboring pair. Temporary
+backing files are reclaimed when their arrays and all views are released,
+including after exceptions or process exit. On platforms with
+`posix_fallocate`, space is reserved before mapping so disk exhaustion raises
+an exception before writes to that array.
+
+`noise_directory` currently applies to pink noise. Trace generation uses
+threads in disk mode to preserve shared mappings. Prefer `n_jobs=1` for
+`PulseCircuit.run_experiment` when minimizing memory: that method's process
+workers may serialize noise arrays. Serializing an environment or explicitly
+copying a whole mapped array can materialize its complete contents in RAM.
+
 ## Citing
 
 If you use **`SpinPulse`** in your research work, please cite our publication

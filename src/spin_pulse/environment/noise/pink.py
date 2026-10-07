@@ -11,15 +11,49 @@
 # copyright notice, and modified files need to carry a notice indicating
 # that they have been altered from the originals.
 # --------------------------------------------------------------------------------------
+# Modified by qBraid in 2026: tiled FFTs and optional disk-backed noise storage.
 """"""
+
+import math
+import os
+from tempfile import TemporaryFile
 
 import matplotlib.pyplot as plt
 import numpy as np
 
 from .noise_time_trace import NoiseTimeTrace
 
+_BLOCK_SAMPLES = 65536
 
-def get_pink_noise(segment_duration: int, seed: int | None = None):
+
+def _empty_noise_array(length, dtype, noise_directory):
+    if noise_directory is None:
+        return np.empty(length, dtype=dtype)
+    # The mapping owns the backing file after the Python file handle closes.
+    # TemporaryFile is unlinked automatically; views keep it alive as needed.
+    with TemporaryFile(dir=noise_directory) as file:
+        size = length * np.dtype(dtype).itemsize
+        if hasattr(os, "posix_fallocate"):
+            # Reserve disk space before mapping, so ENOSPC raises an exception
+            # rather than causing SIGBUS on a later write to a sparse mapping.
+            os.posix_fallocate(file.fileno(), 0, size)
+        else:
+            file.truncate(size)
+        return np.memmap(file, dtype=dtype, mode="w+", shape=(length,))
+
+
+def _flush(values):
+    if isinstance(values, np.memmap):
+        # Clean file pages can be reclaimed under a process/cgroup memory limit.
+        values.flush()
+
+
+def get_pink_noise(
+    segment_duration: int,
+    seed: int | None = None,
+    *,
+    noise_directory: str | os.PathLike | None = None,
+):
     """Generate a single segment of pink noise using an inverse FFT method.
 
     The generated sequence has length ``segment_duration`` and follows a
@@ -40,6 +74,10 @@ def get_pink_noise(segment_duration: int, seed: int | None = None):
           pink noise segment.
         seed (int | None): Optional seed for reproducible random
           number generation.
+        noise_directory: Existing directory on a disk filesystem for temporary
+          arrays. If supplied, return a float64 memmap; otherwise return an
+          in-memory array. Files live as long as the arrays and their views.
+          Avoid tmpfs when the goal is to reduce RAM usage.
 
     Returns:
         ndarray: Array of length ``segment_duration`` containing a
@@ -49,24 +87,59 @@ def get_pink_noise(segment_duration: int, seed: int | None = None):
         ValueError: If ``segment_duration`` is odd.
 
     """
-    if segment_duration % 2 != 0:
-        raise ValueError("segment_duration must be even")
+    if segment_duration < 2 or segment_duration % 2 != 0:
+        raise ValueError("segment_duration must be even and at least 2")
 
     rng = np.random.default_rng(seed=seed)
-    N = segment_duration
-    N2 = N // 2 - 1
-    f = np.arange(2, N2 + 2)
-    beta = 1.0
-    A2 = 1 / (f ** (beta / 2))
-    p2 = (rng.uniform(size=N2) - 0.5) * 2 * np.pi
-    d2 = A2 * np.exp(1j * p2)
-    d = np.concatenate(([0], d2, [1 / ((N2 + 2) ** beta)], np.flipud(np.conj(d2))))
-    x = np.real(np.fft.ifft(d))
-    return N * x
+    n = segment_duration
+    spectrum = _empty_noise_array(n, np.complex128, noise_directory)
+    spectrum[0] = 0
+    spectrum[n // 2] = 1 / (n // 2 + 1)
+    for start in range(1, n // 2, _BLOCK_SAMPLES):
+        stop = min(n // 2, start + _BLOCK_SAMPLES)
+        frequencies = np.arange(start + 1, stop + 1)
+        phases = (rng.uniform(size=stop - start) - 0.5) * 2 * np.pi
+        spectrum[start:stop] = (1 / frequencies**0.5) * np.exp(1j * phases)
+        spectrum[n - stop + 1 : n - start + 1] = np.conj(spectrum[start:stop][::-1])
+    _flush(spectrum)
+
+    # Exact-length Cooley-Tukey factorization. Never pad to a convenient FFT
+    # length: doing so changes the frequencies and the low-frequency cutoff.
+    # Bound the first dimension so column transforms and twiddles stay small.
+    rows = max(
+        (d for d in range(2, min(512, math.isqrt(n)) + 1) if n % d == 0),
+        default=2,
+    )
+    columns = n // rows
+    matrix = spectrum.reshape(rows, columns)
+    tile = max(1, _BLOCK_SAMPLES // rows)
+    row_indices = np.arange(rows)[:, None]
+    for start in range(0, columns, tile):
+        stop = min(columns, start + tile)
+        block = np.fft.ifft(matrix[:, start:stop], axis=0)
+        block *= np.exp(2j * np.pi * row_indices * np.arange(start, stop)[None, :] / n)
+        matrix[:, start:stop] = block
+    _flush(spectrum)
+    for row in range(rows):
+        matrix[row, :] = np.fft.ifft(matrix[row, :])
+    _flush(spectrum)
+
+    output = _empty_noise_array(n, np.float64, noise_directory)
+    for start in range(0, columns, tile):
+        stop = min(columns, start + tile)
+        output[start * rows : stop * rows] = (
+            matrix[:, start:stop].real.T.reshape(-1) * n
+        )
+    _flush(output)
+    return output
 
 
 def get_pink_noise_with_repetitions(
-    duration: int, segment_duration: int, seed: int | None = None
+    duration: int,
+    segment_duration: int,
+    seed: int | None = None,
+    *,
+    noise_directory: str | os.PathLike | None = None,
 ):
     """Generate pink noise of a given total duration by repeating segments.
 
@@ -79,21 +152,32 @@ def get_pink_noise_with_repetitions(
         segment_duration (int): Length of each repeated pink noise segment.
         seed (int | None): Optional seed for reproducible random
           number generation.
+        noise_directory: Optional disk directory, as in ``get_pink_noise``.
 
     Returns:
         ndarray: Pink noise trace of length ``duration``.
 
     """
-    segments = []
-    total_len = 0
-
-    while total_len < duration:
-        segment = get_pink_noise(segment_duration, seed)
-        segments.append(segment)
-        total_len += len(segment)
-
-    # Concatenate all segments and trim to exact length
-    return np.concatenate(segments)[:duration]
+    if duration < 1:
+        raise ValueError("duration must be positive")
+    if duration == segment_duration:
+        return get_pink_noise(segment_duration, seed, noise_directory=noise_directory)
+    if segment_duration < 2 or segment_duration % 2:
+        raise ValueError("segment_duration must be even and at least 2")
+    output = _empty_noise_array(duration, np.float64, noise_directory)
+    for start in range(0, duration, segment_duration):
+        # Preserve seed semantics: integer/SeedSequence seeds repeat, Generator
+        # seeds advance, and None draws a new independent segment each time.
+        segment = get_pink_noise(
+            segment_duration, seed, noise_directory=noise_directory
+        )
+        count = min(segment_duration, duration - start)
+        for offset in range(0, count, _BLOCK_SAMPLES):
+            stop = min(count, offset + _BLOCK_SAMPLES)
+            output[start + offset : start + stop] = segment[offset:stop]
+        del segment
+    _flush(output)
+    return output
 
 
 class PinkNoiseTimeTrace(NoiseTimeTrace):
@@ -121,7 +205,13 @@ class PinkNoiseTimeTrace(NoiseTimeTrace):
     """
 
     def __init__(
-        self, T2S: float, duration: int, segment_duration: int, seed: int | None = None
+        self,
+        T2S: float,
+        duration: int,
+        segment_duration: int,
+        seed: int | None = None,
+        *,
+        noise_directory: str | os.PathLike | None = None,
     ):
         """Create a pink noise time trace for spin qubit simulations.
 
@@ -139,30 +229,49 @@ class PinkNoiseTimeTrace(NoiseTimeTrace):
             segment_duration (int): Length of each pink noise segment.
             seed (int | None): Optional seed for reproducible random
               number generation.
+            noise_directory: Optional disk directory for temporary trace and
+              FFT arrays. ``values`` remains a NumPy array (a memmap).
 
         Returns:
             None: The time trace is stored internally in ``self.values``.
 
         """
-        super().__init__(duration)
+        # The base initializer allocates a zero-filled array which would be
+        # discarded immediately. Allocate the final noise values directly.
+        self.duration = duration
 
         self.segment_duration = segment_duration
 
         S0 = 1 / (4 * np.pi**2 * np.log(segment_duration) * T2S**2)
 
-        self.values = (
-            2
-            * np.pi
-            * np.sqrt(S0)
-            * get_pink_noise_with_repetitions(duration, segment_duration, seed)
+        self.values = get_pink_noise_with_repetitions(
+            duration, segment_duration, seed, noise_directory=noise_directory
         )
+        scale = 2 * np.pi * np.sqrt(S0)
+        for start in range(0, duration, _BLOCK_SAMPLES):
+            self.values[start : start + _BLOCK_SAMPLES] *= scale
+        _flush(self.values)
 
         self.S0 = S0
         self.T2S = T2S
 
-        self.sigma = np.std(
-            np.asarray(self.values), ddof=0
-        )  # ddof=0 for population std deviation
+        # Two-pass population standard deviation with bounded temporaries.
+        # np.std on a complete memmap allocates a trace-sized deviation array.
+        mean = (
+            math.fsum(
+                float(np.sum(self.values[start : start + _BLOCK_SAMPLES]))
+                for start in range(0, duration, _BLOCK_SAMPLES)
+            )
+            / duration
+        )
+        variance = (
+            math.fsum(
+                float(np.sum((self.values[start : start + _BLOCK_SAMPLES] - mean) ** 2))
+                for start in range(0, duration, _BLOCK_SAMPLES)
+            )
+            / duration
+        )
+        self.sigma = math.sqrt(variance)
 
     def plot_ramsey_contrast(self, ramsey_duration: int):
         """Plot analytical and numerical Ramsey contrast curves.
