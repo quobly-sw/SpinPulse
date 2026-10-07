@@ -16,9 +16,9 @@
 
 import math
 import os
+import shutil
 import weakref
-from pathlib import Path
-from tempfile import NamedTemporaryFile, TemporaryFile
+from tempfile import NamedTemporaryFile, TemporaryFile, mkdtemp
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -28,17 +28,30 @@ from .noise_time_trace import NoiseTimeTrace
 _BLOCK_SAMPLES = 65536
 
 
+def _remove_noise_directory(directory):
+    try:
+        shutil.rmtree(directory)
+    except FileNotFoundError:
+        # A caller may already have removed its private job scratch directory.
+        pass
+
+
 def _empty_noise_array(length, dtype, noise_directory, *, shared=False):
     if noise_directory is None:
         return np.empty(length, dtype=dtype)
     # Histories need a filename so joblib's process workers can reopen them.
     # FFT workspaces stay anonymous and are never transported to another process.
-    file = (
-        NamedTemporaryFile(dir=noise_directory, prefix="spin-pulse-", delete=False)
-        if shared
-        else TemporaryFile(dir=noise_directory)
+    # Process workers reopen histories by path. Keep them beneath a mode-0700
+    # directory even when the caller supplies shared HPC scratch as the parent.
+    private_directory = (
+        mkdtemp(dir=noise_directory, prefix="spin-pulse-") if shared else None
     )
     try:
+        file = (
+            NamedTemporaryFile(dir=private_directory, delete=False)
+            if shared
+            else TemporaryFile(dir=noise_directory)
+        )
         with file:
             size = length * np.dtype(dtype).itemsize
             if hasattr(os, "posix_fallocate"):
@@ -46,18 +59,16 @@ def _empty_noise_array(length, dtype, noise_directory, *, shared=False):
                 os.posix_fallocate(file.fileno(), 0, size)
             else:
                 file.truncate(size)
-            values = np.memmap(
-                file.name if shared else file, dtype=dtype, mode="r+", shape=(length,)
-            )
+            values = np.memmap(file, dtype=dtype, mode="r+", shape=(length,))
     except BaseException:
-        if shared:
-            Path(file.name).unlink(missing_ok=True)
+        if private_directory is not None:
+            _remove_noise_directory(private_directory)
         raise
     if shared:
         # Tie deletion to the underlying mapping, not a particular array view.
         # Joblib workers borrow the filename while the parent owns its arrays.
         cleanup = weakref.finalize(
-            values._mmap, Path(file.name).unlink, missing_ok=True
+            values._mmap, _remove_noise_directory, private_directory
         )
         # Windows cannot unlink a still-open mapping at interpreter shutdown.
         # Normal last-view cleanup runs after mmap has closed its OS handles.

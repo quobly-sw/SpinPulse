@@ -69,7 +69,8 @@ Allow disk space for eight bytes per sample per retained trace, plus a
 sixteen-byte-per-sample FFT spectrum and any additional segment needed when
 `duration != segment_duration`. Pink noise has one frequency trace per qubit
 and, when `TJS` is set, one coupling trace per neighboring pair. Temporary
-backing files are reclaimed when their arrays and all views are released,
+history files are created in private subdirectories, and backing files and
+subdirectories are reclaimed when their arrays and all views are released,
 including after exceptions. Use a private job directory and remove it after
 the job exits: forced termination (or Windows interpreter shutdown) can leave
 named history files behind. On platforms with

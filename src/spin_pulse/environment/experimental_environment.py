@@ -15,6 +15,7 @@
 """Description of the noisy environment associated to a hardware."""
 
 import os
+from typing import cast
 
 import numpy as np
 from joblib import Parallel, delayed
@@ -53,6 +54,9 @@ class ExperimentalEnvironment:
         | type[QuasistaticNoiseTimeTrace]
         | type[PinkNoiseTimeTrace]
     )
+
+    # Environments restored from older pickles did not store this option.
+    noise_directory: str | os.PathLike | None = None
 
     def __init__(
         self,
@@ -125,7 +129,8 @@ class ExperimentalEnvironment:
 
     def _generate_trace(self, coherence_time: float, seed):
         if self.noise_directory is not None:
-            return PinkNoiseTimeTrace(
+            generator = cast(type[PinkNoiseTimeTrace], self.noise_generator)
+            return generator(
                 coherence_time,
                 self.duration,
                 self.segment_duration,
@@ -176,7 +181,7 @@ class ExperimentalEnvironment:
         )
 
         parallel_options = (
-            {"prefer": "threads"} if self.noise_directory is not None else {}
+            {"require": "sharedmem"} if self.noise_directory is not None else {}
         )
         self.time_traces = Parallel(n_jobs=n_jobs, **parallel_options)(
             delayed(self._generate_time_trace_on_qubit)(qubit_seeds[index])

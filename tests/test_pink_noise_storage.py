@@ -87,6 +87,8 @@ def hardware_specs():
 
 
 def test_disk_environment_keeps_streams_across_parallel_redraws(tmp_path):
+    from joblib import parallel_config
+
     options = {
         "hardware_specs": hardware_specs(),
         "duration": 1026,
@@ -100,7 +102,10 @@ def test_disk_environment_keeps_streams_across_parallel_redraws(tmp_path):
     for generation in range(3):
         if generation:
             reference.generate_time_traces()
-            actual.generate_time_traces(n_jobs=2)
+            # An ambient process preference must not move the backing-file
+            # owner into a worker that exits before the parent can reopen it.
+            with parallel_config(backend="loky"):
+                actual.generate_time_traces(n_jobs=2)
         for old, new in zip(
             reference.time_traces + reference.time_traces_coupling,
             actual.time_traces + actual.time_traces_coupling,
@@ -108,6 +113,82 @@ def test_disk_environment_keeps_streams_across_parallel_redraws(tmp_path):
         ):
             assert isinstance(new.values, np.memmap)
             np.testing.assert_array_equal(old.values, new.values)
+
+
+def test_disk_environment_uses_custom_pink_noise_generator(tmp_path):
+    class CustomPinkNoise(PinkNoiseTimeTrace):
+        def get_analytical_contrast(self, idle_duration):
+            return 0.25
+
+    env = ExperimentalEnvironment(hardware_specs(), noise_directory=tmp_path)
+    env.noise_generator = CustomPinkNoise
+    env.generate_time_traces()
+    assert env.get_analytical_contrast(10) == 0.25
+
+
+def test_older_pickled_environment_can_regenerate_noise():
+    import pickle
+
+    from tests.fixtures.dummy_objects import DummyHardwareSpecs
+
+    env = ExperimentalEnvironment(DummyHardwareSpecs(num_qubits=2), seed=7)
+    # Serialized pre-option environments contain precisely these older fields.
+    del env.noise_directory
+    restored = pickle.loads(pickle.dumps(env))
+    old_values = restored.time_traces[0].values.copy()
+    restored.generate_time_traces()
+    assert restored.noise_directory is None
+    assert not np.array_equal(old_values, restored.time_traces[0].values)
+
+
+def test_history_files_have_a_private_directory_even_in_shared_scratch(tmp_path):
+    import os
+    import stat
+    from pathlib import Path
+
+    values = get_pink_noise(1026, 7, noise_directory=tmp_path)
+    directory = Path(values.filename).parent
+    assert directory.parent == tmp_path
+    assert directory != tmp_path
+    if os.name == "posix":
+        assert stat.S_IMODE(directory.stat().st_mode) == 0o700
+        assert stat.S_IMODE(Path(values.filename).stat().st_mode) == 0o600
+
+
+def test_failed_disk_reservation_cleans_up_history_directory(tmp_path):
+    import os
+    import subprocess
+    import sys
+
+    if os.name != "posix":
+        pytest.skip("Requires POSIX file-size resource limits")
+    subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            """
+import errno
+import resource
+import signal
+import sys
+from spin_pulse.environment.noise.pink import get_pink_noise_with_repetitions
+
+signal.signal(signal.SIGXFSZ, signal.SIG_IGN)
+resource.setrlimit(resource.RLIMIT_FSIZE, (8192, 8192))
+try:
+    get_pink_noise_with_repetitions(1000000, 2, seed=0, noise_directory=sys.argv[1])
+except OSError as exc:
+    assert exc.errno == errno.EFBIG, exc
+else:
+    raise AssertionError("Allocation unexpectedly bypassed the file-size limit")
+""",
+            str(tmp_path),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert list(tmp_path.iterdir()) == []
 
 
 def test_noisy_unitaries_match_released_noise_across_shot_windows(tmp_path):
