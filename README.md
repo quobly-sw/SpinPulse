@@ -70,15 +70,19 @@ sixteen-byte-per-sample FFT spectrum and any additional segment needed when
 `duration != segment_duration`. Pink noise has one frequency trace per qubit
 and, when `TJS` is set, one coupling trace per neighboring pair. Temporary
 backing files are reclaimed when their arrays and all views are released,
-including after exceptions or process exit. On platforms with
+including after exceptions. Use a private job directory and remove it after
+the job exits: forced termination (or Windows interpreter shutdown) can leave
+named history files behind. On platforms with
 `posix_fallocate`, space is reserved before mapping so disk exhaustion raises
 an exception before writes to that array.
 
 `noise_directory` currently applies to pink noise. Trace generation uses
-threads in disk mode to preserve shared mappings. Prefer `n_jobs=1` for
-`PulseCircuit.run_experiment` when minimizing memory: that method's process
-workers may serialize noise arrays. Serializing an environment or explicitly
-copying a whole mapped array can materialize its complete contents in RAM.
+threads in disk mode to preserve shared mappings. Shot execution through
+`PulseCircuit.run_experiment` can use process workers, which reopen the same
+named history files. Prefer `n_jobs=1` when minimizing concurrent workspaces.
+Keep the original environment alive while workers use it. Other serialization
+methods or explicitly copying a whole mapped array can materialize its complete
+contents in RAM.
 
 ## Citing
 

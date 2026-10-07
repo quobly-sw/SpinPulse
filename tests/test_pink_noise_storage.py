@@ -183,6 +183,7 @@ def test_disk_arrays_release_files_when_last_view_is_released(tmp_path):
     del view
     gc.collect()
     assert backing_files() == []
+    assert list(tmp_path.iterdir()) == []
 
 
 @pytest.mark.parametrize("length", [0, -2, 1, 3])
@@ -190,3 +191,43 @@ def test_invalid_segment_fails_before_creating_disk_files(tmp_path, length):
     with pytest.raises(ValueError, match="even and at least 2"):
         get_pink_noise(length, noise_directory=tmp_path)
     assert list(tmp_path.iterdir()) == []
+
+
+def test_seeded_counts_match_with_disk_histories_and_process_workers(tmp_path):
+    from qiskit import QuantumCircuit
+    from qiskit_aer import AerSimulator
+
+    circuit = QuantumCircuit(2)
+    circuit.rx(1.0, 1)
+    circuit.rz(0.7, 0)
+    circuit.rx(0.3, 0)
+    circuit.rzz(1.2, 0, 1)
+    circuit.measure_all()
+    specs = hardware_specs()
+    pulse = PulseCircuit.from_circuit(specs.gate_transpile(circuit), specs)
+    duration = pulse.duration * 102
+    duration += duration % 2
+    results = []
+    for directory, workers in [(None, 1), (tmp_path, 1), (tmp_path, 2)]:
+        env = ExperimentalEnvironment(
+            specs,
+            T2S=100,
+            TJS=200,
+            duration=duration,
+            segment_duration=duration,
+            seed=7,
+            noise_directory=directory,
+        )
+        simulator = AerSimulator(seed_simulator=7, max_parallel_threads=1)
+        results.append(
+            pulse.run_experiment(
+                env,
+                simulator,
+                num_samples=100,
+                progress_bar=False,
+                seed_progression_function=lambda seed: seed + 70,
+                n_jobs=workers,
+            )
+        )
+    assert sum(results[0].values()) == 100
+    assert results[0] == results[1] == results[2]
