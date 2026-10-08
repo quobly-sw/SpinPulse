@@ -1,5 +1,5 @@
 # --------------------------------------------------------------------------------------
-# Modified by qBraid in 2026: optional disk-backed pink noise histories.
+# Modified by Kenny Heitritter in 2026: optional disk-backed pink noise histories.
 # This code is part of SpinPulse.
 #
 # (C) Copyright Quobly 2025.

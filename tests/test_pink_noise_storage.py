@@ -1,5 +1,5 @@
 # Copyright (C) Quobly 2025. Licensed under the Apache License, Version 2.0.
-# Added by qBraid in 2026 to verify memory optimizations against SpinPulse 1.1.3.
+# Added by Kenny Heitritter in 2026 to verify memory optimizations against SpinPulse 1.1.3.
 """Differential tests against the released Fourier construction."""
 
 import numpy as np

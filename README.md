@@ -31,7 +31,7 @@ Detailed information on our model and the code structure is presented in our [pu
 
 ## Large pink-noise environments
 
-*Documentation added by qBraid in 2026 for the pink-noise memory optimization.*
+*Documentation added by Kenny Heitritter in 2026 for the pink-noise memory optimization.*
 
 Long experiments can keep noise histories on disk by passing an existing disk
 directory to `ExperimentalEnvironment`:

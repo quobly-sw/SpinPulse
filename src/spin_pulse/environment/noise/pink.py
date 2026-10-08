@@ -11,7 +11,7 @@
 # copyright notice, and modified files need to carry a notice indicating
 # that they have been altered from the originals.
 # --------------------------------------------------------------------------------------
-# Modified by qBraid in 2026: tiled FFTs and optional disk-backed noise storage.
+# Modified by Kenny Heitritter in 2026: tiled FFTs and optional disk-backed noise storage.
 """"""
 
 import math
