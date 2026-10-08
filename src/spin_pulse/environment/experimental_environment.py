@@ -1,5 +1,4 @@
 # --------------------------------------------------------------------------------------
-# Modified by Kenny Heitritter in 2026: optional disk-backed pink noise histories.
 # This code is part of SpinPulse.
 #
 # (C) Copyright Quobly 2025.
@@ -12,6 +11,7 @@
 # copyright notice, and modified files need to carry a notice indicating
 # that they have been altered from the originals.
 # --------------------------------------------------------------------------------------
+# Modified: add optional disk storage for pink-noise histories.
 """Description of the noisy environment associated to a hardware."""
 
 import os

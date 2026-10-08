@@ -11,7 +11,7 @@
 # copyright notice, and modified files need to carry a notice indicating
 # that they have been altered from the originals.
 # --------------------------------------------------------------------------------------
-# Modified by Kenny Heitritter in 2026: tiled FFTs and optional disk-backed noise storage.
+# Modified: reduce pink-noise memory usage and add optional disk storage.
 """"""
 
 import math
@@ -39,10 +39,8 @@ def _remove_noise_directory(directory):
 def _empty_noise_array(length, dtype, noise_directory, *, shared=False):
     if noise_directory is None:
         return np.empty(length, dtype=dtype)
-    # Histories need a filename so joblib's process workers can reopen them.
-    # FFT workspaces stay anonymous and are never transported to another process.
-    # Process workers reopen histories by path. Keep them beneath a mode-0700
-    # directory even when the caller supplies shared HPC scratch as the parent.
+    # Process workers reopen histories by filename; keep them in a private
+    # directory. FFT workspaces stay anonymous.
     private_directory = (
         mkdtemp(dir=noise_directory, prefix="spin-pulse-") if shared else None
     )
