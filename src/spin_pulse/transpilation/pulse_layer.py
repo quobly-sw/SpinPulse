@@ -210,11 +210,12 @@ class PulseLayer:
             H, coeff = pulse_sequence.to_hamiltonian()
             ## Adding the corresponding one qubit hamiltonians
             H0, coeff0 = self.oneq_pulse_sequences[qubits[0]._index].to_hamiltonian()
-            H0 = np.einsum("dij,ab->di aj b", H0, np.eye(2)).reshape(
+            #  Little-endian convention: qubits[0] is the least significant (I \otimes H0)
+            H0 = np.einsum("dij,ab->daibj", H0, np.eye(2)).reshape(
                 H0.shape[0], H0.shape[1] * 2, H0.shape[2] * 2
             )
             H1, coeff1 = self.oneq_pulse_sequences[qubits[1]._index].to_hamiltonian()
-            H1 = np.einsum("dij,ab->da ib j", H1, np.eye(2)).reshape(
+            H1 = np.einsum("dij,ab->diajb", H1, np.eye(2)).reshape(
                 H1.shape[0], H1.shape[1] * 2, H1.shape[2] * 2
             )
             H = np.concatenate((H, H0, H1), axis=0)

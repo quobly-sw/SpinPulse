@@ -17,9 +17,13 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 import qiskit as qi
+from qiskit.quantum_info import Operator
 
 from spin_pulse import HardwareSpecs, Shape
-from spin_pulse.transpilation.instructions import IdleInstruction
+from spin_pulse.transpilation.instructions import (
+    IdleInstruction,
+    SquareRotationInstruction,
+)
 from spin_pulse.transpilation.pulse_layer import PulseLayer
 from spin_pulse.transpilation.pulse_sequence import PulseSequence
 
@@ -143,3 +147,88 @@ def test_attach_dynamical_decoupling_runs():
     pl = PulseLayer(qubits, oneq, [])
 
     pl.attach_dynamical_decoupling(hardware)  # should not crash
+
+
+def make_z_sequence(qubit, hardware, duration=21):
+    # Return a one-qubit Z PulseSequence and its rotation angle.
+    instr = SquareRotationInstruction(
+        "z", [qubit], hardware.fields["z"], 1.0, hardware.ramp_duration, duration
+    )
+    return PulseSequence([instr]), instr.to_angle()
+
+
+def make_idle_sequence(qubits, duration=21):
+    # Return an idle PulseSequence on the given qubits.
+    return PulseSequence([IdleInstruction(qubits, duration=duration)])
+
+
+@pytest.mark.parametrize("reverse_operands", [False, True])
+def test_to_circuit_two_qubit_layer_local_term_on_right_qubit(reverse_operands):
+    """With a zero-coupling two-qubit sequence and a Z pulse on qubit 0 only, to_circuit
+    must equal rz(angle) on qubit 0.
+    """
+
+    hardware = make_hardware(2)
+    qreg = qi.QuantumRegister(2)
+    qubits = list(qreg)
+    pair = qubits[::-1] if reverse_operands else qubits
+
+    z_seq, angle = make_z_sequence(qubits[0], hardware)
+    oneq = [z_seq, make_idle_sequence([qubits[1]])]
+    twoq = [make_idle_sequence(pair)]
+    pl = PulseLayer(qubits, oneq, twoq)
+
+    expected = qi.QuantumCircuit(qreg)
+    expected.rz(angle, 0)
+
+    assert Operator(pl.to_circuit()).equiv(Operator(expected))
+
+
+@pytest.mark.parametrize("reverse_operands", [False, True])
+def test_to_circuit_two_qubit_layer_different_pulses_on_both_qubits(reverse_operands):
+    """With a zero-coupling two-qubit sequence and Z pulses of different angles on
+    qubits 0 and 1, to_circuit must apply each rz to its own qubit.
+    """
+
+    hardware = make_hardware(2)
+    qreg = qi.QuantumRegister(2)
+    qubits = list(qreg)
+    pair = qubits[::-1] if reverse_operands else qubits
+
+    z_seq_0, angle_0 = make_z_sequence(qubits[0], hardware, duration=21)
+    z_seq_1, angle_1 = make_z_sequence(qubits[1], hardware, duration=31)
+    oneq = [z_seq_0, z_seq_1]
+    twoq = [make_idle_sequence(pair, duration=31)]
+    pl = PulseLayer(qubits, oneq, twoq)
+
+    expected = qi.QuantumCircuit(qreg)
+    expected.rz(angle_0, 0)
+    expected.rz(angle_1, 1)
+
+    unitary = Operator(pl.to_circuit())
+    assert unitary.equiv(Operator(expected))
+    assert not unitary.equiv(Operator(expected.reverse_bits()))
+
+
+@pytest.mark.parametrize("reverse_operands", [False, True])
+def test_to_circuit_two_qubit_layer_inside_larger_register(reverse_operands):
+    """With a zero-coupling two-qubit sequence on qubits 1 and 2 of a 3-qubit register,
+    Z pulses on qubits 0 and 2 must give rz on qubits 0 and 2.
+    """
+
+    hardware = make_hardware(3)
+    qreg = qi.QuantumRegister(3)
+    qubits = list(qreg)
+    pair = [qubits[2], qubits[1]] if reverse_operands else [qubits[1], qubits[2]]
+
+    z_seq_0, angle_0 = make_z_sequence(qubits[0], hardware, duration=31)
+    z_seq_2, angle_2 = make_z_sequence(qubits[2], hardware, duration=21)
+    oneq = [z_seq_0, make_idle_sequence([qubits[1]]), z_seq_2]
+    twoq = [make_idle_sequence(pair)]
+    pl = PulseLayer(qubits, oneq, twoq)
+
+    expected = qi.QuantumCircuit(qreg)
+    expected.rz(angle_0, 0)
+    expected.rz(angle_2, 2)
+
+    assert Operator(pl.to_circuit()).equiv(Operator(expected))
