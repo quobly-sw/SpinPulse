@@ -15,6 +15,7 @@
 
 import pytest
 from qiskit import QuantumCircuit
+from qiskit.circuit.random import random_circuit
 from qiskit.transpiler import PassManager
 from qiskit.transpiler.passmanager import StagedPassManager
 
@@ -190,3 +191,34 @@ def test_invalid_hardware_dynamic():
             coeff_duration=8,
             dynamical_decoupling=False,
         )
+
+
+@pytest.mark.parametrize("optim", [0, 1, 2, 3])
+def test_seeded_gate_transpile_is_reproducible(optim):
+    """Test that a seed makes gate_transpile return the same circuit."""
+    circ = random_circuit(5, 6, max_operands=2, seed=3)
+
+    def build_hardware_specs():
+        return HardwareSpecs(
+            num_qubits=5,
+            B_field=0.5,
+            delta=0.2,
+            J_coupling=0.01,
+            rotation_shape=Shape.GAUSSIAN,
+            optim=optim,
+            seed=7,
+        )
+
+    hardware_specs = build_hardware_specs()
+    assert hardware_specs.seed == 7
+    isa_circ = hardware_specs.gate_transpile(circ)
+    for other in (
+        hardware_specs.gate_transpile(circ),
+        build_hardware_specs().gate_transpile(circ),
+    ):
+        assert other == isa_circ
+        assert (
+            other.layout.initial_index_layout()
+            == isa_circ.layout.initial_index_layout()
+        )
+        assert other.layout.final_index_layout() == isa_circ.layout.final_index_layout()

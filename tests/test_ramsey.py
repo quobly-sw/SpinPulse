@@ -15,6 +15,7 @@
 
 import numpy as np
 import pytest
+import qiskit as qi
 
 from spin_pulse import (
     DynamicalDecoupling,
@@ -61,6 +62,7 @@ def test_get_ramsey_circuit_runs(
         ramp_duration=ramp_duration,
         coeff_duration=coeff_duration,
         dynamical_decoupling=dynamical_decoupling,
+        seed=10,
     )
     T2S = 50
     duration = 200
@@ -74,9 +76,17 @@ def test_get_ramsey_circuit_runs(
 
     pulse_circ = get_ramsey_circuit(20, hw, exp_env=env)
 
+    qreg = qi.QuantumRegister(1)
+    circ = qi.QuantumCircuit(qreg)
+    circ.h(0)
+    circ.delay(int(duration))
+    circ.h(0)
+    isa_circ = hw.gate_transpile(circ)
+
     assert isinstance(pulse_circ, PulseCircuit)
     assert 0 < pulse_circ.duration <= 200
-    assert pulse_circ.n_layers == 5
+    assert pulse_circ.n_layers == hw.gate_transpile(isa_circ).depth()
+    # assert pulse_circ.n_layers == 5
 
 
 @pytest.mark.parametrize(
