@@ -75,6 +75,7 @@ class HardwareSpecs:
         - optim (int): Qiskit optimization level
         - coupling_map (list[tuple[int,int]] | None): Coupling between qubits
         - basis_gate (list[str]): Basis gate available for physical qubits.
+        - seed (int | None): Seed making the transpilation reproducible.
 
     """
 
@@ -93,6 +94,7 @@ class HardwareSpecs:
         coeff_duration: int = 5,
         dynamical_decoupling: DynamicalDecoupling | None = None,
         optim: int = 0,
+        seed: int | None = None,
     ):
         """
         Initialize the HardwareSpecs object that defines the hardware specifications.
@@ -107,11 +109,13 @@ class HardwareSpecs:
             coeff_duration (int, optional): Duration coefficient for Gaussian pulses. Default is 5.
             dynamical_decoupling (DynamicalDecoupling, optional): If not None, defines the dynamical decoupling sequence to be applied to Idle qubits.
             optim (int): Optimization level for transpilation.
+            seed (int | None, optional): Seed making the transpilation reproducible. If None (default), ``gate_transpile`` may return different circuits across calls.
 
         """
 
         self.num_qubits: int = num_qubits
         self.J_coupling: float = J_coupling
+        self.seed: int | None = seed
 
         self.coupling_map: list[tuple[int, int]] | None
         if num_qubits > 1:
@@ -162,9 +166,10 @@ class HardwareSpecs:
             num_qubits=num_qubits,
             coupling_map=self.coupling_map,
             basis_gates=self.basis_gates,
+            seed=self.seed,
         )
         self.first_pass = generate_preset_pass_manager(
-            target=backend.target, optimization_level=optim
+            target=backend.target, optimization_level=optim, seed_transpiler=self.seed
         )
         self.second_pass = PassManager(
             [RZZEchoPass(), Optimize1qGatesDecomposition(target=backend.target)]
@@ -210,6 +215,7 @@ class HardwareSpecs:
             f"  ramp_duration: {self.ramp_duration}",
             f"  coeff_duration: {getattr(self, 'coeff_duration', 'N/A')}",
             f"  dynamical_decoupling: {self.dynamical_decoupling}",
+            f"  seed: {self.seed}",
         ]
 
         return "\n".join(summary)
